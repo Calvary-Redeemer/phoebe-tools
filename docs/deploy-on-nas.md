@@ -13,8 +13,13 @@ lives in `/opt/data/phoebe-state`.
 
 ## 1. Clone the repo
 
+UGOS has no `git` package, and system packages added by hand can be wiped by UGOS
+updates, so git runs in a throwaway `alpine/git` container instead. It runs as root,
+so fix ownership afterwards.
+
 ```bash
-sudo git clone https://github.com/Calvary-Redeemer/phoebe-tools /volume2/docker/hermes/tools
+sudo docker run --rm -v /volume2/docker/hermes:/work -w /work \
+  alpine/git clone https://github.com/Calvary-Redeemer/phoebe-tools tools
 sudo chown -R hermes:users /volume2/docker/hermes/tools
 sudo mkdir -p /volume2/docker/hermes/data/phoebe-state
 sudo chown hermes:users /volume2/docker/hermes/data/phoebe-state
@@ -82,6 +87,7 @@ the order of service, who's scheduled and confirmed, and any unfilled positions.
 ## Updating
 
 ```bash
-cd /volume2/docker/hermes/tools && sudo -u hermes git pull
+sudo docker run --rm -v /volume2/docker/hermes/tools:/git -w /git alpine/git pull
+sudo chown -R hermes:users /volume2/docker/hermes/tools
 # if uv.lock changed, rerun step 3; then /reload-mcp in Slack
 ```
