@@ -1,0 +1,20 @@
+[project]
+name = "phoebe-tools"
+version = "0.1.0"
+description = "Least-privilege MCP tool servers for Phoebe, Calvary Redeemer's church admin agent"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=2.10",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

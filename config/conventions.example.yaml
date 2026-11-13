@@ -1,0 +1,16 @@
+# Copy to /volume2/docker/hermes/data/phoebe-state/conventions.yaml on the NAS and fill in.
+# The real file is not committed (it's in .gitignore). Notion task 17.
+service_type_name: "Sunday Morning"     # as shown by list_service_types
+sermon_item:                             # how to recognise the sermon item
+  title_contains: "Sermon"
+  passage_in: description                # title | description
+scripture_reading_item:
+  title_contains: "Scripture Reading"
+required_positions:                      # exact PCO team position names
+  - "Service Leader"
+  - "Music Leader"
+  - "Scripture Reader"
+  - "Preacher"
+communion:
+  first_sunday: true
+  title_contains: "Communion"
