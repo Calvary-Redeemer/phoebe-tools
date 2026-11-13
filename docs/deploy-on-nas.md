@@ -39,16 +39,22 @@ not pick up compose changes).
 
 ## 3. Build the Python environment once
 
+`uv` isn't on the container's PATH. Hermes ships it at a versioned path
+(`/opt/hermes/tools/uv-<version>-linux-x64/uv`) that changes when Hermes updates, so copy
+it into Phoebe's own state folder once and always use that copy:
+
 ```bash
+sudo docker exec hermes sh -c 'ls -d /opt/hermes/tools/uv-*/uv'      # find the current path
+sudo docker exec -u 1002 hermes sh -c 'mkdir -p /opt/data/phoebe-state/bin && \
+  cp /opt/hermes/tools/uv-0.13.5-linux-x64/uv /opt/data/phoebe-state/bin/uv && \
+  /opt/data/phoebe-state/bin/uv --version'
+
 sudo docker exec -u 1002 \
   -e UV_PROJECT_ENVIRONMENT=/opt/data/phoebe-state/venv \
   -e UV_CACHE_DIR=/opt/data/cache/uv \
-  hermes uv --directory /opt/tools sync --frozen --no-dev
+  -e UV_PYTHON_INSTALL_DIR=/opt/data/phoebe-state/python \
+  hermes /opt/data/phoebe-state/bin/uv --directory /opt/tools sync --frozen --no-dev
 ```
-
-If `uv` isn't on the container's PATH, find it with
-`sudo docker exec hermes sh -c 'command -v uv || ls /opt/data/installs/*/environments/*/venv/bin/uv'`
-and use that full path here and in config.yaml.
 
 ## 4. Register the server with Hermes
 
@@ -58,13 +64,14 @@ In Hermes's config (`/volume2/docker/hermes/data/config.yaml`, which is
 ```yaml
 mcp_servers:
   pco:
-    command: "uv"
+    command: "/opt/data/phoebe-state/bin/uv"
     args: ["--directory", "/opt/tools", "run", "--frozen", "--no-dev",
            "python", "-m", "servers.pco.server"]
     env:
       PCO_ENV_FILE: "/opt/secrets/pco.env"
       UV_PROJECT_ENVIRONMENT: "/opt/data/phoebe-state/venv"
       UV_CACHE_DIR: "/opt/data/cache/uv"
+      UV_PYTHON_INSTALL_DIR: "/opt/data/phoebe-state/python"
     tools:
       include: [list_service_types, list_upcoming_plans, get_plan]
       prompts: false
