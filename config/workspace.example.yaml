@@ -1,0 +1,17 @@
+# Copy to /volume2/docker/hermes/data/phoebe-state/workspace.yaml on the NAS and fill in.
+# The real file is not committed (it's in .gitignore): sheet and calendar IDs stay on the NAS.
+#
+# Phoebe's workspace tools take the short names on the left ("preaching_schedule",
+# "church"), never IDs, so she can read only what is listed here.
+
+sheets:
+  preaching_schedule:                # the first sheet listed is read_sheet's default
+    id: "<spreadsheet ID: the long string between /d/ and /edit in the sheet's URL>"
+    default_tab: "Q4"                # optional; the first tab when omitted
+    columns: "A:H"                   # optional; leave out to read every column
+
+calendars:
+  church: "<calendar ID: Google Calendar > Settings > the calendar > Integrate calendar>"
+  # phoebe: "primary"                # Phoebe's own calendar, handy for a first test
+
+default_calendar: church             # optional; the first calendar listed when omitted
