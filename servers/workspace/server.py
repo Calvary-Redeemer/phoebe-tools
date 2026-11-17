@@ -14,6 +14,7 @@ passes a raw ID. create_doc (scripture reading, weekly email draft) arrives with
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
@@ -93,6 +94,14 @@ def read_sheet(sheet: str | None = None, tab: str | None = None, max_rows: int =
     }
 
 
+def _local(moment: datetime, tz_name: str | None) -> str:
+    """Show a time in the calendar's own time zone, so 8 pm Monday in Denver doesn't read as Tuesday (UTC)."""
+    try:
+        return moment.astimezone(ZoneInfo(tz_name)).isoformat(timespec="seconds")
+    except Exception:  # no zone name, an unknown one, or no time zone database on this machine
+        return moment.isoformat(timespec="seconds")
+
+
 def _when(point: dict) -> tuple[str | None, bool]:
     """A Calendar start/end is {'date': ...} for all-day events or {'dateTime': ...} otherwise."""
     return (point["date"], True) if "date" in point else (point.get("dateTime"), False)
@@ -103,7 +112,7 @@ def list_calendar(calendar: str | None = None, days_ahead: int = 14) -> dict:
     """List events on a configured church Google Calendar from now through the next
     `days_ahead` days (default 14, max 90), soonest first. Repeating events appear once
     per occurrence. Returns title, start, end, location, and a shortened description:
-    no guest lists or email addresses."""
+    no guest lists or email addresses. `from` and `to` are in the calendar's time zone."""
     days_ahead = max(1, min(int(days_ahead), 90))
     start = _now()
     end = start + timedelta(days=days_ahead)
@@ -142,8 +151,8 @@ def list_calendar(calendar: str | None = None, days_ahead: int = 14) -> dict:
         "calendar": name,
         "title": meta.get("summary"),
         "time_zone": meta.get("timeZone"),
-        "from": start.isoformat(timespec="seconds"),
-        "to": end.isoformat(timespec="seconds"),
+        "from": _local(start, meta.get("timeZone")),
+        "to": _local(end, meta.get("timeZone")),
         "events": events,
     }
 

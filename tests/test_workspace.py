@@ -287,7 +287,8 @@ def test_list_calendar_shapes_events_and_drops_guests(wired, monkeypatch):
     }})
     result = ws_server.list_calendar(days_ahead=30)
     assert result["calendar"] == "church" and result["title"] == "Church Calendar"
-    assert result["from"] == "2026-11-16T21:00:00+00:00" and result["to"] == "2026-12-16T21:00:00+00:00"
+    # The window is reported in the calendar's time zone, not UTC.
+    assert result["from"] == "2026-11-16T14:00:00-07:00" and result["to"] == "2026-12-16T14:00:00-07:00"
     assert [e["title"] for e in result["events"]] == ["Men's Bible Study", "Thanksgiving", "Elders"]
     study, holiday, elders = result["events"]
     assert study["repeats"] and study["location"] == "Fellowship Hall" and not study["all_day"]
@@ -300,6 +301,21 @@ def test_list_calendar_shapes_events_and_drops_guests(wired, monkeypatch):
     params = fake.api_requests[0].url.params
     assert params["singleEvents"] == "true" and params["orderBy"] == "startTime"
     assert params["timeMin"] == "2026-11-16T21:00:00+00:00" and "attendees" not in params["fields"]
+
+
+def test_list_calendar_evening_in_denver_is_still_the_same_day(wired, monkeypatch):
+    # 8:38 pm Monday in Denver is already Tuesday in UTC; the reported window must say Monday.
+    monkeypatch.setattr(ws_server, "_now", lambda: datetime(2026, 11, 17, 3, 38, tzinfo=timezone.utc))
+    fake = wired({EVENTS_PATH: {"summary": "Church Calendar", "timeZone": "America/Denver", "items": []}})
+    result = ws_server.list_calendar()
+    assert result["from"] == "2026-11-16T20:38:00-07:00" and result["to"] == "2026-11-30T20:38:00-07:00"
+    assert fake.api_requests[0].url.params["timeMin"] == "2026-11-17T03:38:00+00:00"   # same instant
+
+
+def test_list_calendar_falls_back_to_utc_without_a_usable_time_zone(wired, monkeypatch):
+    monkeypatch.setattr(ws_server, "_now", lambda: datetime(2026, 11, 17, 3, 38, tzinfo=timezone.utc))
+    wired({EVENTS_PATH: {"summary": "Church Calendar", "timeZone": "Not/A_Zone", "items": []}})
+    assert ws_server.list_calendar()["from"] == "2026-11-17T03:38:00+00:00"
 
 
 def test_list_calendar_caps_the_window_and_follows_pages(wired, monkeypatch):
