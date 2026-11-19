@@ -10,8 +10,8 @@ which checks for a ✅ from an approved person **in code**, not just in her inst
 
 | Server | Status | Tools |
 |---|---|---|
-| `servers/pco` | Week 2: read-only | `list_service_types`, `list_upcoming_plans`, `get_plan` |
-| `servers/workspace` | Week 2: read-only | `read_sheet`, `list_calendar` (`create_doc` planned, Week 3) |
+| `servers/pco` | Week 2: read-only | `list_service_types`, `list_upcoming_plans`, `get_plan`, `check_sunday_readiness` (the Sunday readiness check) |
+| `servers/workspace` | Week 2: read-only | `read_sheet`, `list_calendar`, `preaching_schedule` (`create_doc` planned, Week 3) |
 | `servers/sermonaudio` | Week 2: read-only | `get_latest_sermons`, `get_sermon` |
 | `servers/gmail` | planned (Week 3) | `list_new_messages`, `get_message` |
 | `servers/youtube` | planned (Week 4) | `get_latest_stream`, `get_video`, `propose_video_update` |

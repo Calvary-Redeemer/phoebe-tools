@@ -99,11 +99,13 @@ mcp_servers:
            "python", "-m", "servers.pco.server"]
     env:
       PCO_ENV_FILE: "/opt/secrets/pco.env"
+      PCO_CONVENTIONS_FILE: "/opt/data/phoebe-state/conventions.yaml"
+      PHOEBE_STATE_DIR: "/opt/data/phoebe-state"
       UV_PROJECT_ENVIRONMENT: "/opt/data/phoebe-state/venv"
       UV_CACHE_DIR: "/opt/data/cache/uv"
       UV_PYTHON_INSTALL_DIR: "/opt/data/phoebe-state/python"
     tools:
-      include: [list_service_types, list_upcoming_plans, get_plan]
+      include: [list_service_types, list_upcoming_plans, get_plan, check_sunday_readiness]
       prompts: false
       resources: false
   workspace:
@@ -113,11 +115,12 @@ mcp_servers:
     env:
       WORKSPACE_TOKEN_FILE: "/opt/secrets/workspace.token"
       WORKSPACE_CONFIG_FILE: "/opt/data/phoebe-state/workspace.yaml"
+      PHOEBE_STATE_DIR: "/opt/data/phoebe-state"
       UV_PROJECT_ENVIRONMENT: "/opt/data/phoebe-state/venv"
       UV_CACHE_DIR: "/opt/data/cache/uv"
       UV_PYTHON_INSTALL_DIR: "/opt/data/phoebe-state/python"
     tools:
-      include: [read_sheet, list_calendar]
+      include: [read_sheet, list_calendar, preaching_schedule]
       prompts: false
       resources: false
   sermonaudio:
@@ -159,6 +162,59 @@ She should call `read_sheet` and `list_calendar`.
 > What are the three newest sermons on SermonAudio? Give me the full details of the latest.
 
 She should call `get_latest_sermons`, then `get_sermon` with the newest sermon's ID.
+
+## 7. The Sunday readiness check (Job A)
+
+Two tools do the whole check in code, and Phoebe posts the result unchanged:
+
+1. `preaching_schedule` (workspace server) parses the schedule sheet into dated rows and
+   saves them to `/opt/data/phoebe-state/cache/preaching_schedule.json`.
+2. `check_sunday_readiness` (pco server) reads the next six Sundays' plans,
+   `conventions.yaml`, and that saved file, and returns a finished `report`.
+
+The saved file is how the sheet and Planning Center get compared without either server
+holding the other's credentials. The check refuses a saved schedule older than 30 minutes
+and says so in the report.
+
+**Settings it needs** (both files live in `/volume2/docker/hermes/data/phoebe-state/`):
+
+- `conventions.yaml`: `time_zone` (for example `"America/Denver"`), the title patterns, the
+  required positions, and optional `preacher_aliases`. See `config/conventions.example.yaml`.
+- `workspace.yaml`: a `schedule:` block under the schedule sheet, with its own `time_zone`.
+  See `config/workspace.example.yaml`.
+
+**Try it by hand** in a fresh Slack thread:
+
+> Run the Sunday readiness check.
+
+**Restrict what scheduled runs can do before scheduling anything.** A scheduled session
+uses the tool list set for Hermes's `cron` platform, not the Slack one. In
+`data/config.yaml`, under `platform_toolsets:`, add:
+
+```yaml
+  cron: [todo]
+```
+
+Restart Hermes, then confirm with a one-run job (`--repeat 1`) that asks Phoebe to list
+her tools: there should be no terminal, file, code, browser, or web tools.
+
+**Schedule it.** Check your Hermes version's flags first
+(`sudo docker exec -u 1002 hermes hermes cron create --help`); these are for v0.22.5:
+
+```bash
+PROMPT='Run the Sunday readiness check. Step 1: call the workspace tool preaching_schedule. Step 2: call the pco tool check_sunday_readiness. Step 3: reply with the exact text of its report field and nothing else. If a tool returns an error, reply with that error message and nothing else. Do not change, add, or summarize anything.'
+
+sudo docker exec -u 1002 hermes hermes cron create "0 9 * * 3" "$PROMPT" \
+  --name job-a-wed --deliver slack:<CHANNEL_ID>
+sudo docker exec -u 1002 hermes hermes cron create "0 9 * * 5" "$PROMPT" \
+  --name job-a-fri --deliver slack:<CHANNEL_ID>
+sudo docker exec -u 1002 hermes hermes cron list
+```
+
+`hermes cron list` shows each job's next run; confirm it reads 09:00 in your own time zone
+(Hermes takes it from `HERMES_TIMEZONE` in `data/.env`). On v0.22.5 a bare schedule like
+`2m` repeats forever, and removing a job deletes its saved output, so for a one-off test
+use `"every 2m" ... --repeat 1` and read `data/cron/output/<job_id>/` before removing it.
 
 ## Updating
 

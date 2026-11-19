@@ -5,7 +5,9 @@ Run by Hermes as a stdio subprocess:
     uv --directory /opt/tools run --frozen python -m servers.pco.server
 
 Environment (set in Hermes's config.yaml under mcp_servers.pco.env):
-    PCO_ENV_FILE=/opt/secrets/pco.env    # PCO_APP_ID and PCO_SECRET
+    PCO_ENV_FILE=/opt/secrets/pco.env                               # PCO_APP_ID and PCO_SECRET
+    PCO_CONVENTIONS_FILE=/opt/data/phoebe-state/conventions.yaml    # how this church writes its plans
+    PHOEBE_STATE_DIR=/opt/data/phoebe-state                         # where the parsed preaching schedule is kept
 
 Every tool here only reads. Changes (song-title quote fixes) arrive in Week 3 as
 propose_* tools behind the Slack approval gate. Tools return only what the Sunday checks
@@ -13,25 +15,35 @@ need: no emails, phone numbers, addresses, or decline reasons.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
 from servers.pco.client import PCOClient, PCOError
+from servers.pco.conventions import ConventionsError, load_conventions
+from servers.pco.readiness import plan_date, run_check, upcoming_sundays
+from shared.schedule_cache import read_cache
 
 mcp = FastMCP(
     "pco",
     instructions=(
         "Read-only access to Calvary Redeemer's Planning Center Services. "
-        "Use list_service_types to find the Sunday service type ID, then "
-        "list_upcoming_plans and get_plan. These tools cannot change anything."
+        "For the Sunday readiness check, first run the workspace tool preaching_schedule, then "
+        "check_sunday_readiness, and post its `report` text exactly as returned. For other questions "
+        "use list_service_types to find the Sunday service type ID, then list_upcoming_plans and "
+        "get_plan. These tools cannot change anything."
     ),
 )
 
 _client: PCOClient | None = None
 
 STATUS_WORDS = {"C": "confirmed", "U": "unconfirmed", "D": "declined"}
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def client() -> PCOClient:
@@ -85,6 +97,10 @@ def list_upcoming_plans(service_type_id: str, count: int = 6) -> list[dict]:
 def get_plan(service_type_id: str, plan_id: str) -> dict:
     """Everything the Sunday readiness check needs for one plan: order of service, who is
     scheduled and whether they've confirmed, positions still unfilled, and plan notes."""
+    return _plan_detail(service_type_id, plan_id)
+
+
+def _plan_detail(service_type_id: str, plan_id: str) -> dict:
     base = f"/services/v2/service_types/{service_type_id}/plans/{plan_id}"
     c = client()
     plan = _fetch(c.get, base)["data"]
@@ -116,6 +132,48 @@ def get_plan(service_type_id: str, plan_id: str) -> dict:
         ],
         "notes": [_attrs(n, ["category_name", "content"]) for n in notes],
     }
+
+
+@mcp.tool
+def check_sunday_readiness(weeks: int = 6) -> dict:
+    """Run the Sunday readiness check: this Sunday's plan in full, and the following Sundays
+    for gaps, `weeks` Sundays in all (default 6, max 12). Every check is decided here from
+    conventions.yaml, with dates worked out in the church's own time zone. Run the workspace
+    tool preaching_schedule first so the schedule sheet can be compared. Post the returned
+    `report` text exactly as it is: do not reword, shorten, or add to it. Changes nothing."""
+    weeks = max(1, min(int(weeks), 12))
+    try:
+        conv = load_conventions()
+    except ConventionsError as exc:
+        raise ToolError(str(exc)) from exc
+    now = _now()
+    today = now.astimezone(conv.zone).date()
+    c = client()
+
+    types = _fetch(c.get_all, "/services/v2/service_types")
+    wanted = conv.service_type_name.strip().casefold()
+    match = [t for t in types if (t.get("attributes", {}).get("name") or "").strip().casefold() == wanted]
+    if not match:
+        names = ", ".join(sorted(t.get("attributes", {}).get("name") or "?" for t in types))
+        raise ToolError(f"No Planning Center service type is named \"{conv.service_type_name}\". "
+                        f"Service types: {names}. Fix service_type_name in conventions.yaml.")
+    service_type_id = match[0]["id"]
+
+    rows = _fetch(
+        c.get_all,
+        f"/services/v2/service_types/{service_type_id}/plans",
+        {"filter": "future", "order": "sort_date", "per_page": 25},
+        limit=25,
+    )
+    sundays = set(upcoming_sundays(today, weeks))
+    plans: dict = {}
+    for row in rows:
+        when = plan_date(row.get("attributes", {}), conv)
+        if when in sundays and when not in plans:
+            plans[when] = _plan_detail(service_type_id, row["id"])
+
+    schedule, reason = read_cache(now=now)
+    return run_check(today, weeks, plans, conv, schedule, reason)
 
 
 if __name__ == "__main__":

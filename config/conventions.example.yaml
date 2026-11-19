@@ -1,16 +1,43 @@
 # Copy to /volume2/docker/hermes/data/phoebe-state/conventions.yaml on the NAS and fill in.
-# The real file is not committed (it's in .gitignore). Notion task 17.
-service_type_name: "Sunday Morning"     # as shown by list_service_types
-sermon_item:                             # how to recognise the sermon item
-  title_contains: "Sermon"
-  passage_in: description                # title | description
+# The real file is not committed (it's in .gitignore). The pco server reads it through
+# PCO_CONVENTIONS_FILE for the Sunday readiness check, and never guesses beyond it.
+
+service_type_name: "Sunday Morning"      # exactly as list_service_types shows it
+time_zone: "America/Denver"              # "this Sunday" and "first Sunday" are worked out in this zone
+
+plan:
+  # How the plan title is written. Must capture `passage` and `title`.
+  # This pattern reads "John 3:1-8 | You Must Be Born Again".
+  title_pattern: '^(?P<passage>.+?)\s*\|\s*(?P<title>.+)$'
+
+sermon_item:
+  # How the sermon item's title is written. Must capture `passage`, `title`, and `preacher`.
+  # This pattern reads "John 3.1-8 | You Must Be Born Again | Pat Doe".
+  title_pattern: '^(?P<passage>.+?)\s*\|\s*(?P<title>.+?)\s*\|\s*(?P<preacher>.+)$'
+  must_match_plan_title: [passage, title]   # flag when these differ from the plan title
+
 scripture_reading_item:
-  title_contains: "Scripture Reading"
-required_positions:                      # exact PCO team position names
+  # Optional. This pattern reads "Scripture Reading: John 3:1-8".
+  title_pattern: '^Scripture Reading:\s*(?P<passage>.+)$'
+
+songs:
+  item_type: song
+  title_must_be_quoted: true             # straight "..." or curly quotes both count
+
+required_positions:                      # exact Planning Center team position names
   - "Service Leader"
   - "Music Leader"
   - "Scripture Reader"
   - "Preacher"
+
+preacher_position: "Preacher"            # whose person must match the sermon item and the schedule sheet
+
 communion:
-  first_sunday: true
-  title_contains: "Communion"
+  required_on: first_sunday              # leave the section out if communion isn't tied to a date
+  title_contains_any: ["Communion", "Lord's Supper"]
+
+# Schedule-sheet name -> Planning Center name, only where the built-in rule can't match.
+# The rule: first names must be exactly equal ("Pat" = "Pat Doe"), and a last initial, if
+# the sheet gives one, must match ("Sam R" = "Sam Roe").
+preacher_aliases: {}
+#  Pat: "Patricia Doe"
