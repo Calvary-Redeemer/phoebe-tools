@@ -40,6 +40,7 @@ communion:
 # schedule sheet and for the preacher named in the sermon item.
 # The rule: first names must be exactly equal ("Pat" = "Pat Doe"), and a last initial, if
 # the sheet gives one, must match ("Sam R" = "Sam Roe"). Planning Center reports the name on
-# the person's record, so a "Patricia Doe" who is written "Pat" everywhere else needs a line:
+# the person's record, so a "Patricia Doe" who is written "Pat" everywhere else needs a line.
+# With it, "Pat" means that one person: "Patricia Doe" or "Pat Doe", and no other Pat.
 preacher_aliases: {}
 #  Pat: "Patricia Doe"

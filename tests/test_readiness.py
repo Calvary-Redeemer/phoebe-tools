@@ -104,10 +104,25 @@ def test_preacher_matching_is_exact_on_first_name(sheet, full, expected):
     assert preacher_matches(sheet, full, {}) is expected
 
 
-def test_an_alias_decides_the_match_outright():
+def test_an_alias_pins_the_schedule_name_to_one_person():
     aliases = parse_conventions({**RAW, "preacher_aliases": {"Matt": "Matthew Example"}}).preacher_aliases
-    assert preacher_matches("Matt", "Matthew Example", aliases)
-    assert not preacher_matches("Matt", "Matt Other", aliases)
+    assert preacher_matches("Matt", "Matthew Example", aliases)       # the record name
+    assert preacher_matches("Matt", "Matt Example", aliases)          # the same person, everyday name
+    assert not preacher_matches("Matt", "Matt Other", aliases)        # another Matt
+    assert not preacher_matches("Matt", "Matthew Other", aliases)
+    assert not preacher_matches("Matt", "Mattias Example", aliases)   # same last name, different first name
+    assert not preacher_matches("Matt", "Matt", aliases)
+
+
+def test_with_nobody_in_the_preacher_position_an_aliased_name_still_agrees_with_the_sermon_item():
+    # Seen Nov 19: the position was empty, so the plan's preacher came from the sermon item,
+    # which says "Matt Example", while the alias pointed at the record name "Matthew Example".
+    aliased = parse_conventions({**RAW, "preacher_aliases": {"Matt": "Matthew Example"}})
+    found = check(plan(team=TEAM[:3]), scope="coming_up", schedule_row=row(), compare=True, conv=aliased)
+    assert codes(found) == ["position_unfilled"]
+    other = plan(team=TEAM[:3], sermon="Genesis 4.17-5.32 | Seeds Of Sin & Hope | Joel Example")
+    assert codes(check(other, scope="coming_up", schedule_row=row(), compare=True, conv=aliased)) == [
+        "position_unfilled", "sheet_preacher_mismatch"]
 
 
 # ---- one plan ----

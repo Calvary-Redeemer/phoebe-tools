@@ -81,13 +81,21 @@ def _short(d: date) -> str:
 def preacher_matches(sheet_name: str, full_name: str, aliases: dict[str, str]) -> bool:
     """Does a name from the schedule ("Matt", "Brian H") mean this Planning Center person?
 
-    An alias decides it outright. Otherwise the first names must be exactly equal, and a
-    last initial or last name, if the schedule gives one, must match the start of the last
-    name. Exact, because "Joe" is the start of "Joel" and they are different people.
+    An alias pins the schedule name to one person: it matches that person's record name
+    ("Matthew Example"), or the same last name written with the everyday first name
+    ("Matt Example", which is how a sermon item names the preacher), and nobody else.
+    Without an alias the first names must be exactly equal, and a last initial or last name,
+    if the schedule gives one, must match the start of the last name. Exact, because "Joe"
+    is the start of "Joel" and they are different people.
     """
     alias = aliases.get(sheet_name.strip().casefold())
     if alias is not None:
-        return _loose(alias) == _loose(full_name)
+        if _loose(alias) == _loose(full_name):
+            return True
+        alias_parts, full_parts, sheet_parts = alias.split(), full_name.split(), sheet_name.split()
+        return (len(full_parts) > 1 and len(alias_parts) > 1 and bool(sheet_parts)
+                and full_parts[-1].casefold() == alias_parts[-1].casefold()
+                and full_parts[0].casefold() == sheet_parts[0].casefold())
     sheet_parts, full_parts = sheet_name.split(), full_name.split()
     if not sheet_parts or not full_parts:
         return False
