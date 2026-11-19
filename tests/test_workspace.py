@@ -224,7 +224,7 @@ def test_server_exposes_only_read_tools():
             return {t.name: t.input_schema["properties"] for t in await c.list_tools()}
 
     tools = asyncio.run(go())
-    assert sorted(tools) == ["list_calendar", "read_sheet"]
+    assert sorted(tools) == ["list_calendar", "preaching_schedule", "read_sheet"]
     # Phoebe passes configured names, never raw spreadsheet or calendar IDs.
     assert not any("id" in arg.lower() for props in tools.values() for arg in props)
 

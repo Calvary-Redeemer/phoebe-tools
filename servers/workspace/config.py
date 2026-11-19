@@ -12,8 +12,11 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import yaml
+
+from servers.workspace.schedule import ScheduleSettings
 
 CONFIG_FILE_VAR = "WORKSPACE_CONFIG_FILE"
 _COLUMNS = re.compile(r"^[A-Z]{1,3}:[A-Z]{1,3}$")
@@ -28,6 +31,7 @@ class SheetEntry:
     id: str
     default_tab: str | None = None
     columns: str | None = None
+    schedule: ScheduleSettings | None = None   # set only on the preaching schedule sheet
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,29 @@ def _entry_id(name: str, entry) -> str:
     return value.strip()
 
 
+def _schedule(name: str, raw) -> ScheduleSettings | None:
+    """Read a sheet's optional `schedule:` block (how preaching_schedule finds dates and names)."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"'{name}' schedule should be a block of settings.")
+    zone = raw.get("time_zone")
+    if not isinstance(zone, str) or not zone.strip():
+        raise ConfigError(f"'{name}' schedule needs a time_zone, for example \"America/Denver\".")
+    try:
+        ZoneInfo(zone.strip())
+    except Exception as exc:  # unknown name, or no time zone database on this machine
+        raise ConfigError(f"'{name}' schedule time_zone \"{zone}\" is not a time zone this machine knows.") from exc
+    known = {"tab_format", "date_header", "sermon_header", "preacher_header"}
+    extra = {k: str(v) for k, v in raw.items() if k in known and v}
+    tab_format = extra.get("tab_format", "Q{quarter}")
+    try:
+        tab_format.format(quarter=1, year=2000)
+    except (KeyError, IndexError, ValueError) as exc:
+        raise ConfigError(f"'{name}' schedule tab_format may only use {{quarter}} and {{year}}.") from exc
+    return ScheduleSettings(time_zone=zone.strip(), **extra)
+
+
 def parse_config(raw: dict | None) -> WorkspaceConfig:
     raw = raw or {}
     if not isinstance(raw, dict):
@@ -70,7 +97,8 @@ def parse_config(raw: dict | None) -> WorkspaceConfig:
         if columns is not None and not _COLUMNS.match(str(columns)):
             raise ConfigError(f"'{name}' columns should look like \"A:H\" (capital letters).")
         tab = opts.get("default_tab")
-        sheets[str(name)] = SheetEntry(_entry_id(name, entry), str(tab) if tab else None, columns)
+        sheets[str(name)] = SheetEntry(_entry_id(name, entry), str(tab) if tab else None, columns,
+                                       _schedule(name, opts.get("schedule")))
     calendars = {str(n): _entry_id(n, e) for n, e in (raw.get("calendars") or {}).items()}
     default = raw.get("default_calendar")
     if default and default not in calendars:

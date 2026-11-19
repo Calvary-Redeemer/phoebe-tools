@@ -5,7 +5,13 @@
 | `read_sheet(sheet?, tab?, max_rows?)` | One tab of a configured Google Sheet as rows of displayed text, plus the list of tab names. Default: the Preaching/Teaching Schedule. |
 | `list_calendar(calendar?, days_ahead?)` | Events on a configured Google Calendar from now through the next 14 days (max 90): title, start, end, location, shortened description. No guest lists or email addresses. |
 
+| `preaching_schedule(weeks?)` | The Preaching/Teaching Schedule parsed into dated rows for the next 8 weeks (max 26): date, passage, preachers, and any rows it couldn't read. Also saves the result to `$PHOEBE_STATE_DIR/cache/preaching_schedule.json`, which the pco server's `check_sunday_readiness` compares with Planning Center. |
+
 `create_doc` (scripture reading and weekly email drafts) is planned for Week 3 with Job B.
+
+`preaching_schedule` needs a `schedule:` block under the sheet in `workspace.yaml` (see
+`config/workspace.example.yaml`). It finds the Date, sermon, and Preacher columns by their
+header text, picks the quarter tab from the date, and skips undated rows.
 
 ## How access is limited
 

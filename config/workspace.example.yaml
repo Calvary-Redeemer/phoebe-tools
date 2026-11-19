@@ -9,6 +9,12 @@ sheets:
     id: "<spreadsheet ID: the long string between /d/ and /edit in the sheet's URL>"
     default_tab: "Q4"                # optional; the first tab when omitted
     columns: "A:H"                   # optional; leave out to read every column
+    schedule:                        # optional; turns on the preaching_schedule tool for this sheet
+      time_zone: "America/Denver"    # "today" for the schedule is worked out in this zone
+      tab_format: "Q{quarter}"       # one tab per quarter: Q1..Q4 ({year} is also available)
+      date_header: "Date"            # columns are found by their header text, not by letter
+      sermon_header: "Series | Text | Title"
+      preacher_header: "Preacher"
 
 calendars:
   church: "<calendar ID: Google Calendar > Settings > the calendar > Integrate calendar>"
