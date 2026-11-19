@@ -98,6 +98,24 @@ def preacher_matches(sheet_name: str, full_name: str, aliases: dict[str, str]) -
     return full_parts[-1].casefold().startswith(sheet_parts[-1].rstrip(".").casefold())
 
 
+def same_person(written: str, full_name: str, aliases: dict[str, str]) -> bool:
+    """Is the name written in a sermon item the person Planning Center has in the position?
+
+    Yes when the two are equal apart from capitals and spacing. Otherwise the schedule-sheet
+    rule decides on the first name (so an alias counts), and a last name, if one is written,
+    must be the same. With the alias  Matt: "Matthew Example"  an item that says
+    "Matt Example" agrees with Matthew Example on the team; without it, it does not.
+    """
+    if _loose(written) == _loose(full_name):
+        return True
+    parts, full_parts = written.split(), full_name.split()
+    if not parts or not full_parts:
+        return False
+    if len(parts) > 1 and parts[-1].casefold() != full_parts[-1].casefold():
+        return False
+    return preacher_matches(parts[0], full_name, aliases)
+
+
 # ---- reading one plan ----
 
 def _sermon(detail: dict, conv: Conventions) -> tuple[re.Match | None, re.Match | None]:
@@ -198,7 +216,7 @@ def check_plan(sunday: date, detail: dict, conv: Conventions, scope: str,
     on_team = scheduled["confirmed"] + scheduled["unconfirmed"]
     if item_match and on_team:
         named = item_match.group("preacher").strip()
-        if not any(_loose(named) == _loose(person) for person in on_team):
+        if not any(same_person(named, person, conv.preacher_aliases) for person in on_team):
             add("preacher_item_vs_team",
                 f"Sermon item names {named}; the {conv.preacher_position} position has {', '.join(on_team)}")
 

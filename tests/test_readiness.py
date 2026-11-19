@@ -9,7 +9,7 @@ from fastmcp.exceptions import ToolError
 from servers.pco import server as pco_server
 from servers.pco.conventions import ConventionsError, load_conventions, parse_conventions
 from servers.pco.readiness import (check_plan, plan_date, preacher_matches, run_check,
-                                   upcoming_sundays)
+                                   same_person, upcoming_sundays)
 from shared import schedule_cache
 from tests.test_pco import make_client
 
@@ -176,6 +176,33 @@ def test_sermon_item_preacher_must_be_the_person_in_the_preacher_position():
     found = check(plan(team=team))
     assert codes(found) == ["preacher_item_vs_team"]
     assert found[0].message == "Sermon item names Matt Example; the Preacher position has Joel Example"
+
+
+def test_a_short_name_in_the_sermon_item_agrees_with_the_long_name_on_the_team_through_an_alias():
+    # Planning Center's person record says "Matthew"; the sermon item and the sheet say "Matt".
+    team = TEAM[:3] + [("Matthew Example", "Preacher", "confirmed")]
+    aliased = parse_conventions({**RAW, "preacher_aliases": {"Matt": "Matthew Example"}})
+    assert check(plan(team=team), conv=aliased) == []
+    assert check(plan(team=team), schedule_row=row(), compare=True, conv=aliased) == []
+    # without the alias both comparisons still speak up
+    assert codes(check(plan(team=team), schedule_row=row(), compare=True)) == [
+        "preacher_item_vs_team", "sheet_preacher_mismatch"]
+
+
+@pytest.mark.parametrize("written, full, expected", [
+    ("Matt Example", "Matthew Example", True),      # the alias, same last name
+    ("matt  example", "Matthew Example", True),
+    ("Matt", "Matthew Example", True),              # first name only
+    ("Matt Other", "Matthew Example", False),       # alias never overrides a different last name
+    ("Matthew Example", "Matthew Example", True),
+    ("Joe Example", "Joel Example", False),         # Joe is not Joel
+    ("Joel Example", "Joel Example", True),
+    ("Joel", "Joel Example", True),
+    ("", "Joel Example", False),
+])
+def test_same_person_rule_for_the_sermon_item(written, full, expected):
+    aliases = parse_conventions({**RAW, "preacher_aliases": {"Matt": "Matthew Example"}}).preacher_aliases
+    assert same_person(written, full, aliases) is expected
 
 
 def test_first_sunday_needs_a_communion_item():

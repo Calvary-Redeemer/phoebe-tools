@@ -36,8 +36,10 @@ communion:
   required_on: first_sunday              # leave the section out if communion isn't tied to a date
   title_contains_any: ["Communion", "Lord's Supper"]
 
-# Schedule-sheet name -> Planning Center name, only where the built-in rule can't match.
+# Short name -> Planning Center name, only where the built-in rule can't match. Used for the
+# schedule sheet and for the preacher named in the sermon item.
 # The rule: first names must be exactly equal ("Pat" = "Pat Doe"), and a last initial, if
-# the sheet gives one, must match ("Sam R" = "Sam Roe").
+# the sheet gives one, must match ("Sam R" = "Sam Roe"). Planning Center reports the name on
+# the person's record, so a "Patricia Doe" who is written "Pat" everywhere else needs a line:
 preacher_aliases: {}
 #  Pat: "Patricia Doe"
