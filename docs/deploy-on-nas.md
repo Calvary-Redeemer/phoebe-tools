@@ -202,7 +202,7 @@ her tools: there should be no terminal, file, code, browser, or web tools.
 (`sudo docker exec -u 1002 hermes hermes cron create --help`); these are for v0.22.5:
 
 ```bash
-PROMPT='Run the Sunday readiness check. Step 1: call the workspace tool preaching_schedule. Step 2: call the pco tool check_sunday_readiness. Step 3: reply with the exact text of its report field and nothing else. If a tool returns an error, reply with that error message and nothing else. Do not change, add, or summarize anything.'
+PROMPT='Run the Sunday readiness check. Step 1: call the workspace tool preaching_schedule. Step 2: call the pco tool check_sunday_readiness. Step 3: reply with the exact text of its report field and nothing else. If a tool returns an error, reply with that error message and nothing else. Do not change, add, or summarize anything. This job must never be silent: always reply with the report, even when it says everything is ready or it is the same as the last one.'
 
 sudo docker exec -u 1002 hermes hermes cron create "0 9 * * 3" "$PROMPT" \
   --name job-a-wed --deliver slack:<CHANNEL_ID>
@@ -215,6 +215,28 @@ sudo docker exec -u 1002 hermes hermes cron list
 (Hermes takes it from `HERMES_TIMEZONE` in `data/.env`). On v0.22.5 a bare schedule like
 `2m` repeats forever, and removing a job deletes its saved output, so for a one-off test
 use `"every 2m" ... --repeat 1` and read `data/cron/output/<job_id>/` before removing it.
+
+**Why the prompt ends with "must never be silent".** Hermes puts its own instructions in
+front of every scheduled prompt, and one of them lets the agent reply `[SILENT]` (nothing is
+posted) when there is "nothing new to report". For a readiness check, a missing post has to
+mean the job broke, never that all is well. Any job that must always post needs a sentence
+like this one. To change the prompt of a job that already exists:
+`sudo docker exec -u 1002 hermes hermes cron edit <id> --prompt "$PROMPT"`.
+
+**Post the report as written.** By default Hermes wraps a scheduled post in its own lines: a
+`Cronjob Response: <name>` header with the job id above, and "To stop or manage this job,
+send me a new message" below. Scheduled runs here have no scheduling tools, so that footer
+invites something that cannot happen. In `data/config.yaml` add:
+
+```yaml
+cron:
+  wrap_response: false
+```
+
+Restart Hermes. To see the result without waiting for 9:00, run a job by hand with
+`sudo docker exec -u 1002 hermes hermes cron run <id>` (it runs at once and leaves the next
+scheduled run alone). Each run's prompt and reply are saved in
+`data/cron/output/<job_id>/<date_time>.md`.
 
 ## Updating
 
