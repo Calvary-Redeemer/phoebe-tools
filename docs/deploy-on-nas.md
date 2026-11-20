@@ -179,7 +179,9 @@ and says so in the report.
 **Settings it needs** (both files live in `/volume2/docker/hermes/data/phoebe-state/`):
 
 - `conventions.yaml`: `time_zone` (for example `"America/Denver"`), the title patterns, the
-  required positions, and optional `preacher_aliases`. See `config/conventions.example.yaml`.
+  required positions, and optional `preacher_aliases` and `confirm_positions` (other positions
+  where this Sunday's report names anyone who hasn't replied). See
+  `config/conventions.example.yaml`. The file is read on every run, so an edit needs no restart.
 - `workspace.yaml`: a `schedule:` block under the schedule sheet, with its own `time_zone`.
   See `config/workspace.example.yaml`.
 

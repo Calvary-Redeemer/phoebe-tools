@@ -55,6 +55,20 @@ def passage_key(text: str | None) -> str | None:
     return f"{book}{ref}"
 
 
+def mixed_separators(text: str | None) -> str | None:
+    """Return the first passage in `text` if it separates chapter and verse two ways.
+
+    "Genesis 4:17-5.32" is returned as typed; "Genesis 4:17-5:32" and "Genesis 4.17-5.32"
+    give None. `passage_key` treats all three as the same passage, which is right for
+    comparing systems and wrong for a title people will read, so this is checked separately.
+    """
+    match = _REFERENCE.search(text or "")
+    if not match:
+        return None
+    ref = match.group("ref")
+    return match.group(0).strip() if ":" in ref and "." in ref else None
+
+
 def same_passage(a: str | None, b: str | None) -> bool:
     """True when both texts contain a passage and the passages are the same."""
     key_a, key_b = passage_key(a), passage_key(b)

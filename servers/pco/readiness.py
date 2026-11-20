@@ -6,7 +6,9 @@ missing or inconsistent and write the report. Phoebe relays the report; she does
 judge, count, or compare anything herself.
 
 Two scopes:
-- "this_sunday": the next Sunday on or after today. Every check runs.
+- "this_sunday": the next Sunday on or after today. Every check runs, including the two
+  that only matter the week of: a passage written two ways in one title ("4:17-5.32"),
+  and people in the `confirm_positions` who haven't replied.
 - "coming_up": the Sundays after it. Only gaps that take time to fix are reported
   (no plan, unfilled or declined positions, missing sermon details, no communion on a
   first Sunday, disagreement with the preaching schedule). People who simply haven't
@@ -19,13 +21,13 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 
 from servers.pco.conventions import Conventions
-from shared.passages import passage_key
+from shared.passages import mixed_separators, passage_key
 
 THIS_SUNDAY = "this_sunday"
 COMING_UP = "coming_up"
 THIS_SUNDAY_ONLY = frozenset({
     "song_title_unquoted", "reading_missing", "sermon_passage_mismatch", "sermon_title_mismatch",
-    "position_unconfirmed", "preacher_item_vs_team",
+    "position_unconfirmed", "preacher_item_vs_team", "passage_punctuation",
 })
 _QUOTE_OPEN, _QUOTE_CLOSE = "\"“", "\"”"
 
@@ -189,12 +191,27 @@ def check_plan(sunday: date, detail: dict, conv: Conventions, scope: str,
                 f"plan title says \"{plan_match.group('title').strip()}\"")
 
     # Scripture reading
+    reading_passage = None
     if conv.reading_title is not None:
-        has_reading = any(
-            (m := conv.reading_title.match((i.get("title") or "").strip())) and m.groupdict().get("passage", "x").strip()
-            for i in detail.get("items", []))
+        has_reading = False
+        for item in detail.get("items", []):
+            match = conv.reading_title.match((item.get("title") or "").strip())
+            if match and match.groupdict().get("passage", "x").strip():
+                has_reading = True
+                reading_passage = match.groupdict().get("passage")
+                break
         if not has_reading:
             add("reading_missing", "No scripture reading item with a passage")
+
+    # One reference written two ways ("4:17-5.32"). The comparisons above read past it on
+    # purpose; a person reading the title would not.
+    for label, text in (("Plan title", plan_match.group("passage") if plan_match else None),
+                        ("Sermon item", item_match.group("passage") if item_match else None),
+                        ("Scripture reading", reading_passage)):
+        mixed = mixed_separators(text)
+        if mixed:
+            add("passage_punctuation",
+                f"{label} has \"{mixed}\": chapter and verse are separated by both \":\" and \".\"")
 
     # Song titles
     if conv.songs_must_be_quoted:
@@ -218,6 +235,21 @@ def check_plan(sunday: date, detail: dict, conv: Conventions, scope: str,
             add("position_unfilled", f"{position}: nobody is scheduled")
         if (people["confirmed"] or people["unconfirmed"]) and needed.get(_loose(position), 0) > 0:
             add("position_unfilled", f"{position}: Planning Center still needs {needed[_loose(position)]} more")
+
+    # Other positions worth a nudge the week of. Unlike a required position, an empty one is
+    # not a finding, and one confirmed person doesn't excuse another who hasn't replied.
+    if scope == THIS_SUNDAY:
+        required = {_loose(p) for p in conv.required_positions}
+        for position in conv.confirm_positions:
+            if _loose(position) in required:
+                continue
+            people = _people(detail, position)
+            if people["unconfirmed"]:
+                add("position_unconfirmed",
+                    f"{position}: waiting on a reply from {', '.join(people['unconfirmed'])}")
+            if people["declined"] and not (people["confirmed"] or people["unconfirmed"]):
+                add("position_declined",
+                    f"{position}: {', '.join(people['declined'])} declined and nobody else is scheduled")
 
     # The sermon item's preacher should be the person in the Preacher position
     scheduled = _people(detail, conv.preacher_position)

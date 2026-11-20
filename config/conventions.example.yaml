@@ -30,6 +30,14 @@ required_positions:                      # exact Planning Center team position n
   - "Scripture Reader"
   - "Preacher"
 
+# Optional. Other positions where, for this Sunday only, the report names anyone who hasn't
+# replied ("Slides: waiting on a reply from Pat Doe"). Unlike a required position, an empty
+# one is not reported, and later Sundays are left alone. Leave it out to check only the
+# required positions.
+confirm_positions: []
+#  - "Slides"
+#  - "Welcome Team"
+
 preacher_position: "Preacher"            # whose person must match the sermon item and the schedule sheet
 
 communion:

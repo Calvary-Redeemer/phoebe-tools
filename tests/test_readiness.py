@@ -33,7 +33,7 @@ TEAM = [("Sam Roe", "Service Leader", "confirmed"), ("Lee Poe", "Music Leader", 
         ("Pat Doe", "Scripture Reading", "confirmed"), ("Matt Example", "Preacher", "confirmed")]
 
 
-def plan(title="Genesis 4:17-5.32 | Seeds of Sin & Hope",
+def plan(title="Genesis 4:17-5:32 | Seeds of Sin & Hope",
          sermon="Genesis 4.17-5.32 | Seeds Of Sin & Hope | Matt Example",
          reading="Scripture Reading: Genesis 4:17–5:32",
          songs=('"Be Thou My Vision"', "“Holy, Holy, Holy”"),
@@ -152,7 +152,40 @@ def test_passage_punctuation_and_title_capitals_are_not_mismatches():
 def test_a_different_passage_is_a_mismatch():
     found = check(plan(sermon="Genesis 4.17-5.31 | Seeds Of Sin & Hope | Matt Example"))
     assert codes(found) == ["sermon_passage_mismatch"]
-    assert "Genesis 4.17-5.31" in found[0].message and "Genesis 4:17-5.32" in found[0].message
+    assert "Genesis 4.17-5.31" in found[0].message and "Genesis 4:17-5:32" in found[0].message
+
+
+def test_one_reference_written_two_ways_is_flagged_where_it_is_written():
+    # The real Nov 22, 2026 plan: title and sermon item said "4:17-5.32", the reading "4:17-5:32".
+    detail = plan(title="Genesis 4:17-5.32 | Seeds of Sin & Hope",
+                  sermon="Sermon: Genesis 4:17-5.32 | Seeds of Sin & Hope | Matt Example",
+                  reading="Scripture Reading: Genesis 4:17-5:32")
+    found = check(detail)
+    assert codes(found) == ["passage_punctuation", "passage_punctuation"]
+    assert [f.message for f in found] == [
+        'Plan title has "Genesis 4:17-5.32": chapter and verse are separated by both ":" and "."',
+        'Sermon item has "Genesis 4:17-5.32": chapter and verse are separated by both ":" and "."',
+    ]
+    reading = check(plan(reading="Scripture Reading: Genesis 4.17-5:32"))
+    assert [f.message for f in reading] == [
+        'Scripture reading has "Genesis 4.17-5:32": chapter and verse are separated by both ":" and "."']
+
+
+@pytest.mark.parametrize("title", [
+    "Genesis 4:17-5:32 | Seeds of Sin & Hope",      # all colons
+    "Genesis 4.17-5.32 | Seeds of Sin & Hope",      # all periods, the way the sheet writes it
+    "Isaiah 11 | The Reign of the Messiah",         # a whole chapter
+    "Genesis 4:17–5:32 | Seeds of Sin & Hope",      # a long dash is not a second separator
+])
+def test_one_style_throughout_is_not_flagged(title):
+    assert check(plan(title=title, sermon=title + " | Matt Example", reading=None), conv=parse_conventions(
+        {**RAW, "scripture_reading_item": {}})) == []
+
+
+def test_mixed_punctuation_is_a_week_of_detail():
+    detail = plan(title="Genesis 4:17-5.32 | Seeds of Sin & Hope")
+    assert codes(check(detail)) == ["passage_punctuation"]
+    assert check(detail, scope="coming_up") == []
 
 
 def test_missing_title_sermon_and_reading_are_each_reported():
@@ -184,6 +217,32 @@ def test_a_confirmed_person_covers_a_position_even_if_another_declined():
     assert check(plan(team=team)) == []
     found = check(plan(team=TEAM, needed=[("Music Leader", 1)]))
     assert [f.message for f in found] == ["Music Leader: Planning Center still needs 1 more"]
+
+
+def test_confirm_positions_name_whoever_has_not_replied_this_sunday():
+    conv = parse_conventions({**RAW, "confirm_positions": ["Slides", "Welcome Team", "Offering Counters", "Usher"]})
+    team = TEAM + [
+        ("Kit Low", "Slides", "unconfirmed"),
+        ("Ann Vee", "Offering Counters", "confirmed"), ("Bo Tan", "Offering Counters", "unconfirmed"),
+        ("Cy Orr", "Welcome Team", "declined"),
+        ("Di Ash", "Sound", "unconfirmed"),                     # not a listed position
+    ]                                                           # nobody is an Usher: not a finding
+    found = check(plan(team=team), conv=conv)
+    assert [(f.code, f.message) for f in found] == [
+        ("position_unconfirmed", "Slides: waiting on a reply from Kit Low"),
+        ("position_declined", "Welcome Team: Cy Orr declined and nobody else is scheduled"),
+        ("position_unconfirmed", "Offering Counters: waiting on a reply from Bo Tan"),   # Ann confirming doesn't cover Bo
+    ]
+    assert check(plan(team=team), scope="coming_up", conv=conv) == []      # five weeks out, nobody is nagged
+    assert check(plan(team=team)) == []                                    # without the list, nothing changes
+
+
+def test_a_replaced_decline_and_a_doubly_listed_position_are_not_repeated():
+    conv = parse_conventions({**RAW, "confirm_positions": ["Slides", "Preacher"]})
+    team = TEAM[:3] + [("Matt Example", "Preacher", "unconfirmed"),
+                       ("Kit Low", "Slides", "declined"), ("Jo Fen", "Slides", "confirmed")]
+    found = check(plan(team=team), conv=conv)
+    assert [f.message for f in found] == ["Preacher: waiting on a reply from Matt Example"]   # once, as a required position
 
 
 def test_sermon_item_preacher_must_be_the_person_in_the_preacher_position():
@@ -273,7 +332,7 @@ def test_all_clear_is_one_line():
 
 def test_report_text_with_every_section():
     plans = {
-        NOV_22: plan(title="Genesis 4:17-5.32 | Seeds of Sin & Mercy", songs=("Amazing Grace",)),
+        NOV_22: plan(title="Genesis 4:17-5:32 | Seeds of Sin & Mercy", songs=("Amazing Grace",)),
         DEC_6: plan(title="Isaiah 11 | The Reign of the Messiah", team=TEAM[:3], sermon=None),
     }
     schedule = {"rows": [row(), row("2026-12-06", "Isaiah 11", ("Joel",))],
@@ -330,6 +389,7 @@ def test_no_plan_for_this_sunday_is_said_plainly():
     ({"sermon_item": {"title_pattern": "("}}, "not a valid pattern"),
     ({"sermon_item": {"title_pattern": r"^(?P<passage>.+)\|(?P<title>.+)$"}}, "must capture preacher"),
     ({"preacher_aliases": ["Matt"]}, "preacher_aliases should map"),
+    ({"confirm_positions": "Slides"}, "confirm_positions should be a list"),
 ])
 def test_conventions_mistakes_are_explained(change, phrase):
     with pytest.raises(ConventionsError, match=phrase):

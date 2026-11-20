@@ -2,7 +2,8 @@
 
 The Sunday check never guesses where a piece of information lives. It reads this file:
 which service type is Sunday worship, how the plan title and sermon item are written,
-which team positions must be filled, when communion is expected. When a convention
+which team positions must be filled, which others should have replied by the week of,
+when communion is expected. When a convention
 changes, a person edits one file and no code changes.
 
 Location: the file named by PCO_CONVENTIONS_FILE
@@ -36,6 +37,7 @@ class Conventions:
     song_item_type: str = "song"
     songs_must_be_quoted: bool = True
     required_positions: tuple[str, ...] = ()
+    confirm_positions: tuple[str, ...] = ()
     preacher_position: str = "Preacher"
     communion_on_first_sunday: bool = False
     communion_terms: tuple[str, ...] = ()
@@ -87,6 +89,9 @@ def parse_conventions(raw: dict | None) -> Conventions:
     aliases = raw.get("preacher_aliases") or {}
     if not isinstance(aliases, dict):
         raise ConventionsError("preacher_aliases should map a schedule name to a Planning Center name.")
+    for key in ("required_positions", "confirm_positions"):
+        if not isinstance(raw.get(key) or [], list):
+            raise ConventionsError(f"{key} should be a list of Planning Center position names.")
     return Conventions(
         service_type_name=name,
         time_zone=zone,
@@ -98,6 +103,7 @@ def parse_conventions(raw: dict | None) -> Conventions:
         song_item_type=str(songs.get("item_type") or "song"),
         songs_must_be_quoted=bool(songs.get("title_must_be_quoted", True)),
         required_positions=tuple(str(p) for p in raw.get("required_positions") or ()),
+        confirm_positions=tuple(str(p) for p in raw.get("confirm_positions") or ()),
         preacher_position=str(raw.get("preacher_position") or "Preacher"),
         communion_on_first_sunday=communion.get("required_on") == "first_sunday",
         communion_terms=tuple(str(t) for t in communion.get("title_contains_any") or ()),
