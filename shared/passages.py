@@ -55,18 +55,23 @@ def passage_key(text: str | None) -> str | None:
     return f"{book}{ref}"
 
 
-def mixed_separators(text: str | None) -> str | None:
-    """Return the first passage in `text` if it separates chapter and verse two ways.
+def mixed_reference(text: str | None) -> str | None:
+    """Return the chapter-and-verse part of the first passage in `text` if it is written two ways.
 
-    "Genesis 4:17-5.32" is returned as typed; "Genesis 4:17-5:32" and "Genesis 4.17-5.32"
-    give None. `passage_key` treats all three as the same passage, which is right for
-    comparing systems and wrong for a title people will read, so this is checked separately.
+    "Genesis 4:17-5.32" gives "4:17-5.32"; "Genesis 4:17-5:32" and "Genesis 4.17-5.32" give
+    None. `passage_key` treats all three as the same passage, which is right for comparing
+    systems and wrong for a title people will read, so this is checked separately.
     """
     match = _REFERENCE.search(text or "")
     if not match:
         return None
-    ref = match.group("ref")
-    return match.group(0).strip() if ":" in ref and "." in ref else None
+    ref = match.group("ref").strip()
+    return ref if ":" in ref and "." in ref else None
+
+
+def with_colons(passage: str) -> str:
+    """Write a passage the way plan titles do: "Isaiah 9.1-7" becomes "Isaiah 9:1-7"."""
+    return re.sub(r"(?<=\d)\.(?=\d)", ":", passage)
 
 
 def same_passage(a: str | None, b: str | None) -> bool:

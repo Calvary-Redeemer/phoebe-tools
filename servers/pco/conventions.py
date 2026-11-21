@@ -2,8 +2,7 @@
 
 The Sunday check never guesses where a piece of information lives. It reads this file:
 which service type is Sunday worship, how the plan title and sermon item are written,
-which team positions must be filled, which others should have replied by the week of,
-when communion is expected. When a convention
+which team positions the service can't run without, when communion is expected. When a convention
 changes, a person edits one file and no code changes.
 
 Location: the file named by PCO_CONVENTIONS_FILE
@@ -37,15 +36,19 @@ class Conventions:
     song_item_type: str = "song"
     songs_must_be_quoted: bool = True
     required_positions: tuple[str, ...] = ()
-    confirm_positions: tuple[str, ...] = ()
     preacher_position: str = "Preacher"
     communion_on_first_sunday: bool = False
     communion_terms: tuple[str, ...] = ()
     preacher_aliases: dict[str, str] = field(default_factory=dict)
+    everyday_names: dict[str, str] = field(default_factory=dict)
 
     @property
     def zone(self) -> ZoneInfo:
         return ZoneInfo(self.time_zone)
+
+
+def _loose(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.casefold())
 
 
 def _pattern(raw: dict, section: str, required: bool) -> re.Pattern | None:
@@ -89,9 +92,14 @@ def parse_conventions(raw: dict | None) -> Conventions:
     aliases = raw.get("preacher_aliases") or {}
     if not isinstance(aliases, dict):
         raise ConventionsError("preacher_aliases should map a schedule name to a Planning Center name.")
-    for key in ("required_positions", "confirm_positions"):
-        if not isinstance(raw.get(key) or [], list):
-            raise ConventionsError(f"{key} should be a list of Planning Center position names.")
+    if not isinstance(raw.get("required_positions") or [], list):
+        raise ConventionsError("required_positions should be a list of Planning Center position names.")
+    # The other direction, for showing a name: "Matthew Example" on the record reads "Matt Example".
+    everyday = {}
+    for short, record in aliases.items():
+        short_parts, record_parts = str(short).split(), str(record).split()
+        if short_parts and len(record_parts) > 1:
+            everyday[_loose(str(record))] = f"{short_parts[0]} {record_parts[-1]}"
     return Conventions(
         service_type_name=name,
         time_zone=zone,
@@ -103,11 +111,11 @@ def parse_conventions(raw: dict | None) -> Conventions:
         song_item_type=str(songs.get("item_type") or "song"),
         songs_must_be_quoted=bool(songs.get("title_must_be_quoted", True)),
         required_positions=tuple(str(p) for p in raw.get("required_positions") or ()),
-        confirm_positions=tuple(str(p) for p in raw.get("confirm_positions") or ()),
         preacher_position=str(raw.get("preacher_position") or "Preacher"),
         communion_on_first_sunday=communion.get("required_on") == "first_sunday",
         communion_terms=tuple(str(t) for t in communion.get("title_contains_any") or ()),
         preacher_aliases={str(k).strip().casefold(): str(v).strip() for k, v in aliases.items()},
+        everyday_names=everyday,
     )
 
 

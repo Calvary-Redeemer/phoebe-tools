@@ -8,8 +8,8 @@ from fastmcp.exceptions import ToolError
 
 from servers.pco import server as pco_server
 from servers.pco.conventions import ConventionsError, load_conventions, parse_conventions
-from servers.pco.readiness import (check_plan, plan_date, preacher_matches, run_check,
-                                   same_person, upcoming_sundays)
+from servers.pco.readiness import (check_plan, fix_lines, overview, plan_date, preacher_matches,
+                                   run_check, same_person, upcoming_sundays)
 from shared import schedule_cache
 from tests.test_pco import make_client
 
@@ -137,8 +137,8 @@ def test_the_real_mercy_grace_mismatch_is_found_and_nothing_else():
                   reading="Scripture Reading: Genesis 4:1–16")
     found = check(detail, sunday=NOV_15)
     assert codes(found) == ["sermon_title_mismatch"]
-    assert found[0].message == ("Sermon item says \"Cain's Sin & God's Grace\"; "
-                                "plan title says \"Cain's Sin & God's Mercy\"")
+    assert found[0].message == ("The sermon item says \"Cain's Sin & God's Grace\"; "
+                                "the plan title says \"Cain's Sin & God's Mercy\"")
     assert found[0].date == "2026-11-15" and found[0].scope == "this_sunday"
 
 
@@ -155,20 +155,21 @@ def test_a_different_passage_is_a_mismatch():
     assert "Genesis 4.17-5.31" in found[0].message and "Genesis 4:17-5:32" in found[0].message
 
 
-def test_one_reference_written_two_ways_is_flagged_where_it_is_written():
+def test_one_reference_written_two_ways_is_one_finding_that_says_what_it_should_be():
     # The real Nov 22, 2026 plan: title and sermon item said "4:17-5.32", the reading "4:17-5:32".
     detail = plan(title="Genesis 4:17-5.32 | Seeds of Sin & Hope",
                   sermon="Sermon: Genesis 4:17-5.32 | Seeds of Sin & Hope | Matt Example",
                   reading="Scripture Reading: Genesis 4:17-5:32")
     found = check(detail)
-    assert codes(found) == ["passage_punctuation", "passage_punctuation"]
-    assert [f.message for f in found] == [
-        'Plan title has "Genesis 4:17-5.32": chapter and verse are separated by both ":" and "."',
-        'Sermon item has "Genesis 4:17-5.32": chapter and verse are separated by both ":" and "."',
-    ]
+    assert [(f.code, f.message) for f in found] == [
+        ("passage_punctuation", 'The plan title and sermon item say "4:17-5.32"; it should be "4:17-5:32"')]
     reading = check(plan(reading="Scripture Reading: Genesis 4.17-5:32"))
-    assert [f.message for f in reading] == [
-        'Scripture reading has "Genesis 4.17-5:32": chapter and verse are separated by both ":" and "."']
+    assert [f.message for f in reading] == ['The scripture reading says "4.17-5:32"; it should be "4:17-5:32"']
+    everywhere = check(plan(title="Genesis 4:17-5.32 | Seeds of Sin & Hope",
+                            sermon="Genesis 4:17-5.32 | Seeds of Sin & Hope | Matt Example",
+                            reading="Scripture Reading: Genesis 4:17-5.32"))
+    assert [f.message for f in everywhere] == [
+        'The plan title, sermon item and scripture reading say "4:17-5.32"; it should be "4:17-5:32"']
 
 
 @pytest.mark.parametrize("title", [
@@ -190,9 +191,25 @@ def test_mixed_punctuation_is_a_week_of_detail():
 
 def test_missing_title_sermon_and_reading_are_each_reported():
     assert codes(check(plan(title="", sermon=None, reading=None))) == [
-        "plan_title_format", "sermon_item_missing", "reading_missing"]
-    assert codes(check(plan(title="Seeds of Sin & Hope"))) == ["plan_title_format"]
+        "plan_title_format", "sermon_item_missing", "reading_missing"]       # TEAM still has a preacher
     assert codes(check(plan(reading="Scripture Reading:"))) == ["reading_missing"]
+
+
+def test_a_title_in_the_wrong_form_comes_with_the_title_it_should_be():
+    # The Advent plans of 2026 were titled the way the schedule sheet writes them.
+    advent = plan(title='Advent Week 1: Isaiah 9.1-7 "Rejoicing at the Coming"',
+                  sermon="Sermon: Isaiah 9.1-7 | Rejoicing at the Coming | Matt Example",
+                  reading="Scripture Reading: Isaiah 9:1-7")
+    assert [f.message for f in check(advent)] == [
+        "The plan title isn't in the form Passage | Sermon Title; it should be \"Isaiah 9:1-7 | Rejoicing at the Coming\""]
+    untitled = plan(title="")
+    assert [f.message for f in check(untitled)] == [
+        "The plan has no title; it should be \"Genesis 4:17-5:32 | Seeds Of Sin & Hope\""]
+    # with no sermon item to work from, it only says what is wrong
+    assert [f.message for f in check(plan(title="Seeds of Sin & Hope", sermon=None))][0] == \
+        "The plan title isn't in the form Passage | Sermon Title"
+    assert [f.message for f in check(plan(title="", sermon=None))][0] == \
+        "The plan has no title (expected Passage | Sermon Title)"
 
 
 def test_song_titles_need_quotes_straight_or_curly():
@@ -201,55 +218,65 @@ def test_song_titles_need_quotes_straight_or_curly():
                                           "Song title isn't in quotes: \"Unfinished"]
 
 
-def test_required_positions_unfilled_declined_and_waiting():
+def test_required_positions_empty_or_declined_but_never_who_has_replied():
     team = [("Sam Roe", "Service Leader", "unconfirmed"), ("Lee Poe", "Music Leader", "declined"),
             ("Matt Example", "Preacher", "confirmed")]
     found = check(plan(team=team))
     assert [(f.code, f.message) for f in found] == [
-        ("position_unconfirmed", "Service Leader: waiting on a reply from Sam Roe"),
         ("position_declined", "Music Leader: Lee Poe declined and nobody else is scheduled"),
         ("position_unfilled", "Scripture Reading: nobody is scheduled"),
-    ]
+    ]                                   # Sam hasn't replied; that is not a finding
 
 
-def test_a_confirmed_person_covers_a_position_even_if_another_declined():
+def test_a_scheduled_person_covers_a_position_even_if_another_declined():
     team = TEAM + [("Ray Moe", "Scripture Reading", "declined")]
     assert check(plan(team=team)) == []
-    found = check(plan(team=TEAM, needed=[("Music Leader", 1)]))
-    assert [f.message for f in found] == ["Music Leader: Planning Center still needs 1 more"]
+    assert check(plan(team=TEAM, needed=[("Music Leader", 1)])) == []      # "needs 1 more" is not this check's business
 
 
-def test_confirm_positions_name_whoever_has_not_replied_this_sunday():
-    conv = parse_conventions({**RAW, "confirm_positions": ["Slides", "Welcome Team", "Offering Counters", "Usher"]})
-    team = TEAM + [
-        ("Kit Low", "Slides", "unconfirmed"),
-        ("Ann Vee", "Offering Counters", "confirmed"), ("Bo Tan", "Offering Counters", "unconfirmed"),
-        ("Cy Orr", "Welcome Team", "declined"),
-        ("Di Ash", "Sound", "unconfirmed"),                     # not a listed position
-    ]                                                           # nobody is an Usher: not a finding
-    found = check(plan(team=team), conv=conv)
-    assert [(f.code, f.message) for f in found] == [
-        ("position_unconfirmed", "Slides: waiting on a reply from Kit Low"),
-        ("position_declined", "Welcome Team: Cy Orr declined and nobody else is scheduled"),
-        ("position_unconfirmed", "Offering Counters: waiting on a reply from Bo Tan"),   # Ann confirming doesn't cover Bo
-    ]
-    assert check(plan(team=team), scope="coming_up", conv=conv) == []      # five weeks out, nobody is nagged
-    assert check(plan(team=team)) == []                                    # without the list, nothing changes
+def test_positions_outside_the_required_ones_are_ignored_and_an_old_list_in_the_file_does_no_harm():
+    conv = parse_conventions({**RAW, "confirm_positions": ["Slides", "Welcome Team"]})   # a retired setting
+    team = TEAM + [("Kit Low", "Slides", "unconfirmed"), ("Cy Orr", "Welcome Team", "declined"),
+                   ("Di Ash", "Nursery", "declined")]
+    assert check(plan(team=team), conv=conv) == [] and check(plan(team=team)) == []
+    lines, any_empty = overview(plan(team=team), conv, None)
+    assert any_empty is False and not any("Kit" in line or "Cy" in line or "Di" in line for line in lines)
 
 
-def test_a_replaced_decline_and_a_doubly_listed_position_are_not_repeated():
-    conv = parse_conventions({**RAW, "confirm_positions": ["Slides", "Preacher"]})
-    team = TEAM[:3] + [("Matt Example", "Preacher", "unconfirmed"),
-                       ("Kit Low", "Slides", "declined"), ("Jo Fen", "Slides", "confirmed")]
-    found = check(plan(team=team), conv=conv)
-    assert [f.message for f in found] == ["Preacher: waiting on a reply from Matt Example"]   # once, as a required position
+def test_overview_is_one_line_per_required_position_in_the_file_s_order():
+    order = ["Preacher", "Service Leader", "Scripture Reading", "Music Leader"]
+    conv = parse_conventions({**RAW, "required_positions": order, "preacher_aliases": {"Matt": "Matthew Example"}})
+    team = [("Sam Roe", "Service Leader", "unconfirmed"), ("Lee Poe", "Music Leader", "confirmed"),
+            ("Pat Doe", "Scripture Reading", "declined"), ("Ann Vee", "Scripture Reading", "confirmed"),
+            ("Bo Tan", "Scripture Reading", "unconfirmed"), ("Matthew Example", "Preacher", "confirmed")]
+    lines, any_empty = overview(plan(team=team), conv, None)
+    assert lines == [
+        "• Preacher: Matt Example",                   # the record says Matthew; the alias gives the everyday name
+        "• Service Leader: Sam Roe",                  # scheduled; whether he has replied is not shown
+        "• Scripture Reading: Ann Vee, Bo Tan",       # Pat declined, so Pat isn't reading
+        "• Music Leader: Lee Poe",
+    ] and any_empty is False
+
+
+def test_overview_says_so_when_a_position_is_empty():
+    conv = parse_conventions({**RAW, "required_positions": ["Preacher", "Service Leader", "Scripture Reading"]})
+    only_declined = [("Pat Doe", "Scripture Reading", "declined")]
+    lines, any_empty = overview(plan(team=only_declined), conv, row(preachers=("Joe", "Matt")))
+    assert lines == [
+        "• Preacher: Matt Example (not scheduled yet)",          # named in the sermon item, not on the team
+        "• Service Leader: nobody yet",
+        "• Scripture Reading: nobody yet",
+    ] and any_empty is True
+    lines, _ = overview(plan(team=[], sermon=None), conv, row(preachers=("Joe", "Matt")))
+    assert lines[0] == "• Preacher: nobody yet (the schedule sheet says Joe/Matt)"
+    assert overview(plan(team=[], sermon=None), conv, None)[0][0] == "• Preacher: nobody yet"
 
 
 def test_sermon_item_preacher_must_be_the_person_in_the_preacher_position():
     team = TEAM[:3] + [("Joel Example", "Preacher", "confirmed")]
     found = check(plan(team=team))
     assert codes(found) == ["preacher_item_vs_team"]
-    assert found[0].message == "Sermon item names Matt Example; the Preacher position has Joel Example"
+    assert found[0].message == "The sermon item names Matt Example; the Preacher position has Joel Example"
 
 
 def test_a_short_name_in_the_sermon_item_agrees_with_the_long_name_on_the_team_through_an_alias():
@@ -291,6 +318,10 @@ def test_later_sundays_report_gaps_but_not_week_of_details():
     detail = plan(title="", sermon=None, reading=None, songs=("Amazing Grace",), team=team)
     assert codes(check(detail, sunday=DEC_6, scope="coming_up")) == [
         "plan_title_format", "sermon_item_missing", "position_unfilled", "position_unfilled", "communion_missing"]
+    nobody = plan(sermon=None, team=TEAM[:3])
+    assert "no_preacher_yet" in codes(check(nobody, sunday=DEC_6, scope="coming_up"))
+    named_only = plan(team=TEAM[:3])                    # the sermon item names a preacher: not a gap yet
+    assert "no_preacher_yet" not in codes(check(named_only, sunday=DEC_6, scope="coming_up"))
 
 
 # ---- schedule sheet vs Planning Center ----
@@ -300,17 +331,18 @@ def test_schedule_agreement_and_each_kind_of_disagreement():
 
     found = check(plan(), schedule_row=row(passage="Genesis 5.1-32", preachers=("Jack",)), compare=True)
     assert [(f.code, f.message) for f in found] == [
-        ("sheet_passage_mismatch", "Schedule sheet has Genesis 5.1-32; Planning Center has Genesis 4.17-5.32"),
-        ("sheet_preacher_mismatch", "Schedule sheet says Jack; Planning Center has Matt Example"),
+        ("sheet_passage_mismatch", "The schedule sheet has Genesis 5.1-32; Planning Center has Genesis 4.17-5.32"),
+        ("sheet_preacher_mismatch", "The schedule sheet says Jack; Planning Center has Matt Example"),
     ]
 
     nobody = plan(sermon=None, team=TEAM[:3])
     found = check(nobody, sunday=DEC_6, scope="coming_up", schedule_row=row("2026-12-06", "Isaiah 11", ("Joel",)),
                   compare=True)
     assert "sheet_preacher_unmatched" in codes(found)
-    assert "Schedule sheet says Joel; Planning Center has no preacher yet" in [f.message for f in found]
+    assert "The schedule sheet says Joel; Planning Center has no preacher yet" in [f.message for f in found]
 
-    assert codes(check(plan(), compare=True)) == ["sheet_row_missing"]
+    assert [f.message for f in check(plan(), compare=True)] == ["This Sunday isn't on the preaching schedule sheet"]
+    assert [f.message for f in check(plan(), scope="coming_up", compare=True)] == ["Not on the preaching schedule sheet"]
     assert check(plan(), schedule_row=row(passage=None, preachers=()), compare=True) == []   # "One Off", no names
 
 
@@ -323,38 +355,93 @@ def test_joe_on_the_sheet_does_not_match_joel_in_planning_center():
 
 # ---- the whole check and its report ----
 
-def test_all_clear_is_one_line():
+def test_a_clean_week_is_the_overview_and_one_line_saying_so():
     result = run_check(date(2026, 11, 18), 2, {NOV_22: plan(), date(2026, 11, 29): plan()}, CONV,
                        {"rows": [row(), row("2026-11-29")], "problems": []}, None)
     assert result["ready"] is True and result["findings"] == [] and result["schedule_compared"] is True
-    assert result["report"] == "✅ Sun Nov 22 is ready. Nothing flagged through Nov 29."
+    assert result["report"].splitlines() == [
+        "*Sun Nov 22* (Wednesday check)",
+        "Genesis 4:17-5:32 | Seeds of Sin & Hope",
+        "• Service Leader: Sam Roe",
+        "• Music Leader: Lee Poe",
+        "• Scripture Reading: Pat Doe",
+        "• Preacher: Matt Example",
+        "✅ Nothing to fix.",
+    ]
+
+
+def test_the_report_brandon_approved_for_nov_22_2026():
+    # Same shape as the real plan that week, with made-up names: an aliased preacher, a mixed
+    # reference in two places, people who hadn't replied, and helpers the report must not mention.
+    conv = parse_conventions({**RAW, "preacher_aliases": {"Matt": "Matthew Example"},
+                              "required_positions": ["Preacher", "Service Leader", "Scripture Reading", "Music Leader"]})
+    team = [("Matthew Example", "Preacher", "confirmed"), ("Sam Roe", "Service Leader", "confirmed"),
+            ("Pat Doe", "Scripture Reading", "confirmed"), ("Lee Poe", "Music Leader", "confirmed"),
+            ("Kit Low", "Slides", "unconfirmed"), ("Cy Orr", "Welcome Team", "unconfirmed"),
+            ("Di Ash", "3 Yrs - K", "declined")]
+    nov_22 = plan(title="Genesis 4:17-5.32 | Seeds of Sin & Hope",
+                  sermon="Sermon: Genesis 4:17-5.32 | Seeds of Sin & Hope | Matt Example",
+                  reading="Scripture Reading: Genesis 4:17-5:32", team=team, needed=[("3 Yrs - K", 1)])
+    advent = plan(title='Advent Week 1: Isaiah 9.1-7 "Rejoicing"', sermon="Isaiah 9.1-7 | Rejoicing | Matt Example",
+                  reading="Scripture Reading: Isaiah 9:1-7", team=team)
+    result = run_check(date(2026, 11, 20), 2, {NOV_22: nov_22, date(2026, 11, 29): advent}, conv,
+                       {"rows": [row(), row("2026-11-29", "Isaiah 9.1-7")], "problems": []}, None)
+    assert result["ready"] is False
+    assert result["report"].splitlines() == [
+        "*Sun Nov 22* (Friday check)",
+        "Genesis 4:17-5.32 | Seeds of Sin & Hope",
+        "• Preacher: Matt Example",
+        "• Service Leader: Sam Roe",
+        "• Scripture Reading: Pat Doe",
+        "• Music Leader: Lee Poe",
+        '*One fix:* the plan title and sermon item say "4:17-5.32"; it should be "4:17-5:32".',
+    ]                                    # next Sunday's title form is a week-of detail: no "Coming up" at all
 
 
 def test_report_text_with_every_section():
     plans = {
-        NOV_22: plan(title="Genesis 4:17-5:32 | Seeds of Sin & Mercy", songs=("Amazing Grace",)),
+        NOV_22: plan(title="Genesis 4:17-5:32 | Seeds of Sin & Mercy", songs=("Amazing Grace", "Be Thou My Vision"),
+                     team=TEAM[:2] + TEAM[3:]),
         DEC_6: plan(title="Isaiah 11 | The Reign of the Messiah", team=TEAM[:3], sermon=None),
+        date(2026, 12, 13): plan(title="Isaiah 35 | Redemption", sermon="Isaiah 35 | Redemption | Matt Example"),
+        date(2026, 12, 20): plan(title="", sermon=None, team=[]),
     }
-    schedule = {"rows": [row(), row("2026-12-06", "Isaiah 11", ("Joel",))],
+    schedule = {"rows": [row(), row("2026-12-06", "Isaiah 11", ("Joel",)), row("2026-12-13", "Isaiah 35", ("Jack",))],
                 "problems": ['Q4 row 9: date "11/8/20206" is not a date']}
-    result = run_check(date(2026, 11, 18), 3, plans, CONV, schedule, None)
+    result = run_check(date(2026, 11, 18), 5, plans, CONV, schedule, None)
     assert result["sunday"] == "2026-11-22" and result["ready"] is False
     assert result["report"] == "\n".join([
-        "*Sunday readiness · Sun Nov 22* (Wednesday run)",
-        "*Needs attention this Sunday*",
-        "• Sermon item says \"Seeds Of Sin & Hope\"; plan title says \"Seeds of Sin & Mercy\"",
-        "• Song title isn't in quotes: Amazing Grace",
+        "*Sun Nov 22* (Wednesday check)",
+        "Genesis 4:17-5:32 | Seeds of Sin & Mercy",
+        "• Service Leader: Sam Roe",
+        "• Music Leader: Lee Poe",
+        "• Scripture Reading: nobody yet",
+        "• Preacher: Matt Example",
+        "*To fix:*",
+        "• The sermon item says \"Seeds Of Sin & Hope\"; the plan title says \"Seeds of Sin & Mercy\"",
+        "• 2 song titles aren't in quotes",
         "*Coming up*",
-        "• Nov 29: No plan yet",
-        "• Dec 6: No sermon item in the form Passage | Title | Preacher",
-        "• Dec 6: Preacher: nobody is scheduled",
-        "• Dec 6: No \"Communion\" item (1st Sunday of the month)",
-        "• Dec 6: Schedule sheet says Joel; Planning Center has no preacher yet",
+        "• No plan yet: Nov 29",
+        "• No preacher yet: Dec 6, Dec 20",
+        "• Not on the schedule sheet: Dec 20",
+        "• Dec 13: The schedule sheet says Jack; Planning Center has Matt Example",
         "*Preaching schedule sheet*",
         "• Q4 row 9: date \"11/8/20206\" is not a date",
-        "_Report only. Nothing was changed._",
     ])
-    assert {f["code"] for f in result["findings"]} >= {"sermon_title_mismatch", "no_plan_yet", "communion_missing"}
+    # shown or not, every finding is still returned for later fixes and tags to attach to
+    assert {f["code"] for f in result["findings"]} >= {
+        "sermon_title_mismatch", "song_title_unquoted", "position_unfilled", "no_plan_yet", "no_preacher_yet",
+        "communion_missing", "sheet_preacher_unmatched", "sheet_preacher_mismatch", "sheet_row_missing"}
+    assert "Communion" not in result["report"] and "Passage | Sermon Title" not in result["report"]
+
+
+def test_one_unquoted_song_is_named_and_an_empty_position_alone_gets_no_all_clear():
+    one = run_check(date(2026, 11, 18), 1, {NOV_22: plan(songs=("Amazing Grace",))}, CONV, None, "x")
+    assert "*One fix:* song title isn't in quotes: Amazing Grace." in one["report"].splitlines()
+    empty = run_check(date(2026, 11, 18), 1, {NOV_22: plan(team=TEAM[1:])}, CONV, {"rows": [row()], "problems": []}, None)
+    assert empty["ready"] is False and fix_lines([]) == []
+    assert empty["report"].splitlines()[2:] == ["• Service Leader: nobody yet", "• Music Leader: Lee Poe",
+                                                "• Scripture Reading: Pat Doe", "• Preacher: Matt Example"]
 
 
 def test_without_a_usable_schedule_the_plan_checks_still_run_and_the_report_says_why():
@@ -368,15 +455,14 @@ def test_without_a_usable_schedule_the_plan_checks_still_run_and_the_report_says
 def test_this_sunday_ready_but_something_coming_up():
     result = run_check(date(2026, 11, 20), 2, {NOV_22: plan()}, CONV, {"rows": [row()], "problems": []}, None)
     assert result["ready"] is True
-    assert result["report"].splitlines() == [
-        "*Sunday readiness · Sun Nov 22* (Friday run)", "✅ This Sunday is ready.",
-        "*Coming up*", "• Nov 29: No plan yet", "_Report only. Nothing was changed._"]
+    assert result["report"].splitlines()[-3:] == ["✅ Nothing to fix.", "*Coming up*", "• No plan yet: Nov 29"]
 
 
 def test_no_plan_for_this_sunday_is_said_plainly():
     result = run_check(date(2026, 11, 18), 1, {}, CONV, {"rows": [], "problems": []}, None)
     assert result["ready"] is False
-    assert "• No Planning Center plan exists for this Sunday" in result["report"]
+    assert result["report"].splitlines() == ["*Sun Nov 22* (Wednesday check)",
+                                             "No Planning Center plan exists for this Sunday."]
 
 
 # ---- conventions file ----
@@ -389,7 +475,7 @@ def test_no_plan_for_this_sunday_is_said_plainly():
     ({"sermon_item": {"title_pattern": "("}}, "not a valid pattern"),
     ({"sermon_item": {"title_pattern": r"^(?P<passage>.+)\|(?P<title>.+)$"}}, "must capture preacher"),
     ({"preacher_aliases": ["Matt"]}, "preacher_aliases should map"),
-    ({"confirm_positions": "Slides"}, "confirm_positions should be a list"),
+    ({"required_positions": "Preacher"}, "required_positions should be a list"),
 ])
 def test_conventions_mistakes_are_explained(change, phrase):
     with pytest.raises(ConventionsError, match=phrase):
@@ -476,12 +562,15 @@ def test_tool_runs_the_whole_check_from_planning_center_and_the_saved_schedule(r
     result = pco_server.check_sunday_readiness(weeks=2)
     assert result["sunday"] == "2026-11-22" and result["schedule_compared"] is True
     assert result["report"].splitlines() == [
-        "*Sunday readiness · Sun Nov 22* (Wednesday run)",
-        "*Needs attention this Sunday*",
-        "• Song title isn't in quotes: Amazing Grace",
+        "*Sun Nov 22* (Wednesday check)",
+        "Genesis 4:17-5:32 | Seeds of Sin & Hope",
+        "• Service Leader: Sam Roe",
+        "• Music Leader: Lee Poe",
+        "• Scripture Reading: Pat Doe",
+        "• Preacher: Matt Example",
+        "*One fix:* song title isn't in quotes: Amazing Grace.",
         "*Coming up*",
-        "• Nov 29: Schedule sheet says Jack; Planning Center has Matt Example",
-        "_Report only. Nothing was changed._",
+        "• Nov 29: The schedule sheet says Jack; Planning Center has Matt Example",
     ]
     assert {r.method for r in handler.seen} == {"GET"}
     assert not any("/plans/12" in r.url.path for r in handler.seen)        # the midweek plan is never opened
@@ -495,7 +584,7 @@ def test_this_sunday_is_worked_out_in_mountain_time(readiness_tool, now, label):
     readiness_tool({"10": ("2026-11-22T17:00:00Z", plan(songs=("Amazing Grace",)))}, now)
     result = pco_server.check_sunday_readiness(weeks=1)
     assert result["sunday"] == "2026-11-22"
-    assert result["report"].startswith(f"*Sunday readiness · Sun Nov 22* ({label} run)")
+    assert result["report"].startswith(f"*Sun Nov 22* ({label} check)\n")
 
 
 def test_a_stale_schedule_is_skipped_and_the_report_says_so(readiness_tool):

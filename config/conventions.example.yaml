@@ -24,19 +24,14 @@ songs:
   item_type: song
   title_must_be_quoted: true             # straight "..." or curly quotes both count
 
-required_positions:                      # exact Planning Center team position names
-  - "Service Leader"
-  - "Music Leader"
-  - "Scripture Reader"
+# The positions the service can't run without, by their exact Planning Center names. The
+# report lists who is in each one, in this order ("• Preacher: Pat Doe"), and says "nobody yet"
+# for an empty one. It never says who has or hasn't accepted, and no other position appears.
+required_positions:
   - "Preacher"
-
-# Optional. Other positions where, for this Sunday only, the report names anyone who hasn't
-# replied ("Slides: waiting on a reply from Pat Doe"). Unlike a required position, an empty
-# one is not reported, and later Sundays are left alone. Leave it out to check only the
-# required positions.
-confirm_positions: []
-#  - "Slides"
-#  - "Welcome Team"
+  - "Service Leader"
+  - "Scripture Reader"
+  - "Music Leader"
 
 preacher_position: "Preacher"            # whose person must match the sermon item and the schedule sheet
 
@@ -49,6 +44,7 @@ communion:
 # The rule: first names must be exactly equal ("Pat" = "Pat Doe"), and a last initial, if
 # the sheet gives one, must match ("Sam R" = "Sam Roe"). Planning Center reports the name on
 # the person's record, so a "Patricia Doe" who is written "Pat" everywhere else needs a line.
-# With it, "Pat" means that one person: "Patricia Doe" or "Pat Doe", and no other Pat.
+# With it, "Pat" means that one person: "Patricia Doe" or "Pat Doe", and no other Pat, and the
+# report shows that person as "Pat Doe".
 preacher_aliases: {}
 #  Pat: "Patricia Doe"

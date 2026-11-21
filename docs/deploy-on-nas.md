@@ -176,12 +176,29 @@ The saved file is how the sheet and Planning Center get compared without either 
 holding the other's credentials. The check refuses a saved schedule older than 30 minutes
 and says so in the report.
 
+The report is short on purpose, because a long one goes unread. It looks like this:
+
+```
+*Sun Nov 22* (Friday check)
+Genesis 4:17-5.32 | Seeds of Sin & Hope
+• Preacher: Pat Doe
+• Service Leader: Sam Roe
+• Scripture Reader: Lee Poe
+• Music Leader: Kit Low
+*One fix:* the plan title and sermon item say "4:17-5.32"; it should be "4:17-5:32".
+```
+
+The plan title, one line per required position, then what needs fixing (or `✅ Nothing to
+fix.`). After that, only when there is something to say: a `*Coming up*` section for later
+Sundays with no plan, no preacher, or a disagreement with the schedule sheet, and a section
+for unreadable rows in the sheet. It never says who has or hasn't accepted. Every finding is
+still returned in `findings` with a stable code, whether the report shows it or not.
+
 **Settings it needs** (both files live in `/volume2/docker/hermes/data/phoebe-state/`):
 
 - `conventions.yaml`: `time_zone` (for example `"America/Denver"`), the title patterns, the
-  required positions, and optional `preacher_aliases` and `confirm_positions` (other positions
-  where this Sunday's report names anyone who hasn't replied). See
-  `config/conventions.example.yaml`. The file is read on every run, so an edit needs no restart.
+  required positions (listed in the order the report should show them), and optional
+  `preacher_aliases`. See `config/conventions.example.yaml`. The file is read on every run, so an edit needs no restart.
 - `workspace.yaml`: a `schedule:` block under the schedule sheet, with its own `time_zone`.
   See `config/workspace.example.yaml`.
 
