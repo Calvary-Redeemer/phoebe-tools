@@ -128,6 +128,7 @@ def test_get_latest_sermons_shapes_output(monkeypatch):
         "preach_date": "2026-11-15",
         "bible_text": "Genesis 4:1-16",
         "series": "Genesis",
+        "series_id": 1,
         "event_type": "Sunday Service",
         "published_at": "2026-11-15T00:00:00+00:00",
         "has_audio": True,
@@ -137,17 +138,65 @@ def test_get_latest_sermons_shapes_output(monkeypatch):
     }]
 
 
-def test_count_is_capped_at_25(monkeypatch):
+def test_it_always_reads_25_and_returns_the_count_asked_for(monkeypatch):
     seen = []
 
     def handler(request):
         seen.append(request.url.params["pageSize"])
-        return httpx.Response(200, json={"results": []})
+        return httpx.Response(200, json={"results": [sermon(sermon_id=str(n)) for n in range(25)]})
 
     monkeypatch.setattr(sa_server, "_client", make_client(handler))
-    sa_server.get_latest_sermons(count=500)
-    sa_server.get_latest_sermons(count=-3)
-    assert seen == ["25", "1"]
+    assert len(sa_server.get_latest_sermons(count=500)) == 25
+    assert len(sa_server.get_latest_sermons(count=-3)) == 1
+    assert len(sa_server.get_latest_sermons()) == 5
+    assert seen == ["25", "25", "25"]
+
+
+def test_get_latest_sermons_saves_what_it_read_for_the_pco_server(monkeypatch, tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from shared import cache
+    monkeypatch.setenv("PHOEBE_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(sa_server, "_client", make_client(
+        lambda r: httpx.Response(200, json={"results": [sermon(sermon_id=str(n)) for n in range(25)]})))
+    returned = sa_server.get_latest_sermons(count=2)
+    saved = json.loads((tmp_path / "cache" / "sermonaudio_latest.json").read_text())
+    assert len(returned) == 2 and len(saved["sermons"]) == 25
+    assert saved["sermons"][0] == returned[0]
+    assert set(saved) == {"generated_at", "sermons"}
+    # no contact details, descriptions, or download links reach the file
+    text = json.dumps(saved)
+    assert "office@example.org" not in text and "a.mp3" not in text and "xxxx" not in text
+
+    data, why = cache.read_json("sermonaudio_latest.json", what="SermonAudio's listings",
+                                rerun="get_latest_sermons")
+    assert why is None and len(data["sermons"]) == 25
+    later = datetime.now(timezone.utc) + timedelta(minutes=45)
+    data, why = cache.read_json("sermonaudio_latest.json", what="SermonAudio's listings",
+                                rerun="get_latest_sermons", now=later)
+    assert data is None and "minutes old" in why and "get_latest_sermons" in why
+
+
+def test_with_nowhere_to_save_the_listings_still_come_back(monkeypatch):
+    from shared import cache
+    monkeypatch.delenv("PHOEBE_STATE_DIR", raising=False)
+    monkeypatch.setattr(sa_server, "_client",
+                        make_client(lambda r: httpx.Response(200, json={"results": [sermon()]})))
+    assert len(sa_server.get_latest_sermons()) == 1
+    data, why = cache.read_json("sermonaudio_latest.json", what="SermonAudio's listings",
+                                rerun="get_latest_sermons")
+    assert data is None and "PHOEBE_STATE_DIR" in why
+    with pytest.raises(cache.CacheError, match="not a cache file name"):
+        cache.write_json("../secrets/x.json", {})
+
+
+def test_a_missing_or_broken_saved_file_says_what_to_run(monkeypatch, tmp_path):
+    from shared import cache
+    monkeypatch.setenv("PHOEBE_STATE_DIR", str(tmp_path))
+    kw = dict(what="SermonAudio's listings", rerun="get_latest_sermons")
+    assert "haven't been read yet (run get_latest_sermons first)" in cache.read_json("sermonaudio_latest.json", **kw)[1]
+    (tmp_path / "cache").mkdir()
+    (tmp_path / "cache" / "sermonaudio_latest.json").write_text("{not json")
+    assert "couldn't be read" in cache.read_json("sermonaudio_latest.json", **kw)[1]
 
 
 def test_get_sermon_adds_detail_and_drops_contact_fields(monkeypatch):

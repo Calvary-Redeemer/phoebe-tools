@@ -6,9 +6,11 @@ Run by Hermes as a stdio subprocess:
 
 Environment (set in Hermes's config.yaml under mcp_servers.sermonaudio.env):
     SERMONAUDIO_ENV_FILE=/opt/secrets/sermonaudio.env    # SA_API_KEY and SA_BROADCASTER_ID
+    PHOEBE_STATE_DIR=/opt/data/phoebe-state              # where get_latest_sermons saves what it read
 
-Both tools only read the church's own listings, so Job D can compare the newest
-sermon with Sunday's Planning Center plan (passage, title, speaker, series, date).
+Both tools only read the church's own listings. get_latest_sermons also saves what it read to
+$PHOEBE_STATE_DIR/cache/sermonaudio_latest.json, which the pco server's check_sermon_listing
+compares with Sunday's Planning Center plan (Job D). The saved file holds public listing data only.
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
 from servers.sermonaudio.client import SermonAudioClient, SermonAudioError
+from shared.cache import CacheError, write_json
 
 mcp = FastMCP(
     "sermonaudio",
@@ -31,6 +34,8 @@ mcp = FastMCP(
 
 SERMON_PAGE = "https://www.sermonaudio.com/sermons/{}"
 MAX_TEXT_CHARS = 1000
+LISTINGS_FILE = "sermonaudio_latest.json"
+SAVED_COUNT = 25      # how many listings the saved file holds, whatever count Phoebe asked for
 
 _client: SermonAudioClient | None = None
 
@@ -71,6 +76,7 @@ def _summary(s: dict) -> dict[str, Any]:
         "preach_date": s.get("preachDate"),
         "bible_text": s.get("bibleText"),
         "series": (s.get("series") or {}).get("title") or s.get("subtitle"),
+        "series_id": (s.get("series") or {}).get("seriesID"),
         "event_type": s.get("eventType"),
         "published_at": _timestamp(s.get("publishTimestamp")),
         "has_audio": bool(audio),
@@ -80,13 +86,28 @@ def _summary(s: dict) -> dict[str, Any]:
     }
 
 
+def _save(sermons: list[dict]) -> None:
+    """Keep what was just read where the pco server can find it. Never fails the read itself:
+    if there is nowhere to save, check_sermon_listing says the listings haven't been read."""
+    try:
+        write_json(LISTINGS_FILE, {
+            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "sermons": sermons,
+        })
+    except CacheError:
+        pass
+
+
 @mcp.tool
 def get_latest_sermons(count: int = 5) -> list[dict]:
     """List the church's newest published sermons on SermonAudio (default 5, max 25),
     most recently preached first: title, speaker, preach date, Bible text, series, event
-    type, and whether audio and video are attached."""
-    count = max(1, min(int(count), 25))
-    return [_summary(s) for s in _fetch(client().latest_sermons, count)]
+    type, and whether audio and video are attached. Also saves the newest 25 for the pco
+    tool check_sermon_listing, so run this first when checking Sunday's listing."""
+    count = max(1, min(int(count), SAVED_COUNT))
+    sermons = [_summary(s) for s in _fetch(client().latest_sermons, SAVED_COUNT)]
+    _save(sermons)
+    return sermons[:count]
 
 
 @mcp.tool
