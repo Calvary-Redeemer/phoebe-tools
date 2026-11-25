@@ -21,6 +21,9 @@ import yaml
 CONVENTIONS_FILE_VAR = "PCO_CONVENTIONS_FILE"
 
 
+LISTING_TITLE_DEFAULT = r"^(?P<passage>.+?)\s*\|\s*(?P<title>.+)$"     # "Genesis 4:17-5:32 | Seeds of Sin & Hope"
+
+
 class ConventionsError(RuntimeError):
     """conventions.yaml is missing or malformed. Message is safe to show in Slack."""
 
@@ -41,6 +44,10 @@ class Conventions:
     communion_terms: tuple[str, ...] = ()
     preacher_aliases: dict[str, str] = field(default_factory=dict)
     everyday_names: dict[str, str] = field(default_factory=dict)
+    # How Sunday sermons are listed on SermonAudio (Job D). All optional in the file.
+    listing_event_type: str = "Sunday Service"
+    listing_title: re.Pattern = re.compile(LISTING_TITLE_DEFAULT)
+    fix_listings: bool = False
 
     @property
     def zone(self) -> ZoneInfo:
@@ -94,6 +101,16 @@ def parse_conventions(raw: dict | None) -> Conventions:
         raise ConventionsError("preacher_aliases should map a schedule name to a Planning Center name.")
     if not isinstance(raw.get("required_positions") or [], list):
         raise ConventionsError("required_positions should be a list of Planning Center position names.")
+    listing = raw.get("sermonaudio") or {}
+    if not isinstance(listing, dict):
+        raise ConventionsError("sermonaudio should be a mapping of settings.")
+    listing_title = _pattern(raw, "sermonaudio", required=False) or re.compile(LISTING_TITLE_DEFAULT)
+    missing = [g for g in ("passage", "title") if g not in listing_title.groupindex]
+    if missing:
+        raise ConventionsError(f"sermonaudio.title_pattern must capture {', '.join(missing)} "
+                               "as named groups, like (?P<passage>...).")
+    if not isinstance(listing.get("fix_listings", False), bool):
+        raise ConventionsError("sermonaudio.fix_listings should be true or false.")
     # The other direction, for showing a name: "Matthew Example" on the record reads "Matt Example".
     everyday = {}
     for short, record in aliases.items():
@@ -116,6 +133,9 @@ def parse_conventions(raw: dict | None) -> Conventions:
         communion_terms=tuple(str(t) for t in communion.get("title_contains_any") or ()),
         preacher_aliases={str(k).strip().casefold(): str(v).strip() for k, v in aliases.items()},
         everyday_names=everyday,
+        listing_event_type=str(listing.get("event_type") or "Sunday Service"),
+        listing_title=listing_title,
+        fix_listings=bool(listing.get("fix_listings", False)),
     )
 
 

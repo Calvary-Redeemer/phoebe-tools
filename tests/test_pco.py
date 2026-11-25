@@ -93,7 +93,8 @@ def list_tool_names():
 
 def test_server_exposes_only_read_tools():
     names = list_tool_names()
-    assert names == ["check_sunday_readiness", "get_plan", "list_service_types", "list_upcoming_plans"]
+    assert names == ["check_sermon_listing", "check_sunday_readiness", "get_plan", "list_service_types",
+                     "list_upcoming_plans"]
     assert not any(n.startswith(("create", "update", "delete", "apply", "propose")) for n in names)
 
 

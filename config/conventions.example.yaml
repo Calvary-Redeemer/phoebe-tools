@@ -48,3 +48,12 @@ communion:
 # report shows that person as "Pat Doe".
 preacher_aliases: {}
 #  Pat: "Patricia Doe"
+
+# How Sunday sermons are listed on SermonAudio, for the listing check (Job D). All optional;
+# these are the values the check uses when the block is left out.
+sermonaudio:
+  fix_listings: false          # true lets Phoebe correct the listing's title, Bible text, and speaker
+                               # herself when the plan title and sermon item agree and the listing
+                               # differs. Read on every run, so turning it off needs no restart.
+  event_type: "Sunday Service" # the SermonAudio category Sunday sermons are filed under
+  title_pattern: '^(?P<passage>.+?)\s*\|\s*(?P<title>.+)$'   # "Genesis 4:17-5:32 | Seeds of Sin & Hope"

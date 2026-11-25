@@ -7,7 +7,8 @@ Run by Hermes as a stdio subprocess:
 Environment (set in Hermes's config.yaml under mcp_servers.pco.env):
     PCO_ENV_FILE=/opt/secrets/pco.env                               # PCO_APP_ID and PCO_SECRET
     PCO_CONVENTIONS_FILE=/opt/data/phoebe-state/conventions.yaml    # how this church writes its plans
-    PHOEBE_STATE_DIR=/opt/data/phoebe-state                         # where the parsed preaching schedule is kept
+    PHOEBE_STATE_DIR=/opt/data/phoebe-state                         # where the parsed preaching schedule and
+                                                                    # the saved SermonAudio listings are kept
 
 Every tool here only reads. Changes (song-title quote fixes) arrive in Week 3 as
 propose_* tools behind the Slack approval gate. Tools return only what the Sunday checks
@@ -15,7 +16,7 @@ need: no emails, phone numbers, addresses, or decline reasons.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastmcp import FastMCP
@@ -23,7 +24,9 @@ from fastmcp.exceptions import ToolError
 
 from servers.pco.client import PCOClient, PCOError
 from servers.pco.conventions import ConventionsError, load_conventions
+from servers.pco.listing import check_listing, last_sunday
 from servers.pco.readiness import plan_date, run_check, upcoming_sundays
+from shared.cache import CacheError, read_json, write_json
 from shared.schedule_cache import read_cache
 
 mcp = FastMCP(
@@ -174,6 +177,66 @@ def check_sunday_readiness(weeks: int = 6) -> dict:
 
     schedule, reason = read_cache(now=now)
     return run_check(today, weeks, plans, conv, schedule, reason)
+
+
+LISTINGS_FILE = "sermonaudio_latest.json"     # written by the sermonaudio server's get_latest_sermons
+CHECK_FILE = "sermon_check.json"              # written here; read by the sermonaudio server when it fixes a listing
+
+
+@mcp.tool
+def check_sermon_listing() -> dict:
+    """Check that last Sunday's sermon is on SermonAudio and agrees with the Planning Center plan
+    (passage, sermon title, speaker; audio and series are noted). Run the sermonaudio tool
+    get_latest_sermons first: this reads the listings it saved. Decides in code which fields of
+    the listing, if any, should change, and saves that list for the sermonaudio server. Changes
+    nothing itself. Post the returned `report` text exactly as it is."""
+    try:
+        conv = load_conventions()
+    except ConventionsError as exc:
+        raise ToolError(str(exc)) from exc
+    now = _now()
+    today = now.astimezone(conv.zone).date()
+    sunday = last_sunday(today)
+
+    saved, reason = read_json(LISTINGS_FILE, what="SermonAudio's listings", rerun="get_latest_sermons", now=now)
+    if saved is None:
+        from shared.listing_report import render
+        result = {"sunday": sunday.isoformat(), "run_day": f"{today:%A}", "fix_listings": conv.fix_listings,
+                  "sermon_id": None, "listing": None, "matches": False, "findings": [], "fixes": [],
+                  "unreadable": reason}
+        result["report"] = render(result)
+        return result
+
+    c = client()
+    types = _fetch(c.get_all, "/services/v2/service_types")
+    wanted = conv.service_type_name.strip().casefold()
+    match = [t for t in types if (t.get("attributes", {}).get("name") or "").strip().casefold() == wanted]
+    if not match:
+        raise ToolError(f"No Planning Center service type is named \"{conv.service_type_name}\". "
+                        "Fix service_type_name in conventions.yaml.")
+    service_type_id = match[0]["id"]
+    base = f"/services/v2/service_types/{service_type_id}/plans"
+    # On the afternoon of its own date a plan may sit in either list, so look in both.
+    rows = (_fetch(c.get_all, base, {"filter": "past", "order": "-sort_date", "per_page": 6}, limit=6)
+            + _fetch(c.get_all, base, {"filter": "future", "order": "sort_date", "per_page": 3}, limit=3))
+    by_day: dict = {}
+    for row in rows:
+        when = plan_date(row.get("attributes", {}), conv)
+        if when is not None and when not in by_day:
+            by_day[when] = row
+    row = by_day.get(sunday)
+    detail = _plan_detail(service_type_id, row["id"]) if row else None
+    earlier = by_day.get(sunday - timedelta(days=7))
+    previous_series = (earlier or {}).get("attributes", {}).get("series_title") if earlier else None
+
+    result = check_listing(today, sunday, detail, previous_series, saved.get("sermons") or [], conv)
+    try:
+        write_json(CHECK_FILE, {"generated_at": now.isoformat(timespec="seconds"), **result})
+        result["saved"] = True
+    except CacheError as exc:
+        result["saved"] = False
+        result["save_problem"] = str(exc)
+    return result
 
 
 if __name__ == "__main__":

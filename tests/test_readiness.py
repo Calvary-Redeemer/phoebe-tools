@@ -621,5 +621,6 @@ def test_the_tool_description_tells_phoebe_to_post_the_report_unchanged():
             return {t.name: t.description for t in await c.list_tools()}
 
     tools = asyncio.run(go())
-    assert sorted(tools) == ["check_sunday_readiness", "get_plan", "list_service_types", "list_upcoming_plans"]
+    assert sorted(tools) == ["check_sermon_listing", "check_sunday_readiness", "get_plan", "list_service_types",
+                     "list_upcoming_plans"]
     assert "exactly as it is" in tools["check_sunday_readiness"]
