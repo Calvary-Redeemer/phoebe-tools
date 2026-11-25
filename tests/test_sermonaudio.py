@@ -108,14 +108,14 @@ def test_rejected_key_message_has_no_key():
 
 # ---- server ----
 
-def test_server_exposes_only_read_tools():
+def test_server_exposes_exactly_these_tools():
     from fastmcp import Client
 
     async def go():
         async with Client(sa_server.mcp) as c:
             return sorted(t.name for t in await c.list_tools())
 
-    assert asyncio.run(go()) == ["get_latest_sermons", "get_sermon"]
+    assert asyncio.run(go()) == ["apply_listing_fixes", "get_latest_sermons", "get_sermon"]
 
 
 def test_get_latest_sermons_shapes_output(monkeypatch):

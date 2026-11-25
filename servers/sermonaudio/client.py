@@ -1,8 +1,14 @@
-"""Read-only SermonAudio API client.
+"""SermonAudio API client: reads, plus one narrow edit.
 
-This class can only send GET requests to SermonAudio's v2 "node" API (the public
-catalogue of sermons). Phase 1 never changes a listing; if Phoebe later corrects
-listings, that goes through the approval gate, not through this client.
+Reads are GET requests to SermonAudio's v2 "node" API (the public catalogue of sermons).
+The one edit is `replace_listing_text`, which corrects the title, Bible text, or speaker of
+one of the church's own listings (Job D). SermonAudio has no "change one field" call for
+these: an edit replaces the listing's text record, so this client reads the record, sends
+every field back, and changes only the ones it was asked to.
+
+The church's API key can do far more than this (delete a sermon, upload media, create a
+series). None of that is written here, and tests fail if any request other than a GET or
+that one PUT can leave this class.
 
 Auth: the church's broadcaster API key, sent in the X-API-Key header.
 Scope: every request is pinned to the church's own broadcaster ID. A sermon that
@@ -22,10 +28,43 @@ BASE_URL = "https://api.sermonaudio.com/v2/"
 USER_AGENT = "phoebe-tools (Calvary Redeemer church admin agent)"
 MAX_RETRIES = 3
 _SERMON_ID = re.compile(r"^[A-Za-z0-9]{1,32}$")
+EDITABLE_FIELDS = ("fullTitle", "bibleText", "speakerName")     # the only fields an edit may change
+MAX_TEXT = 200
 
 
 class SermonAudioError(RuntimeError):
     """A SermonAudio request failed. Message is safe to show in Slack (no secrets)."""
+
+
+def edit_body(record: dict) -> dict[str, Any]:
+    """The fields SermonAudio's update call takes, filled from a listing as it stands now.
+
+    Sending these back unchanged leaves the listing as it was. The publish time must be among
+    them: SermonAudio treats a missing one as "not published".
+    """
+    keywords = record.get("keywords")
+    if isinstance(keywords, (list, tuple)):
+        keywords = " ".join(str(k) for k in keywords)
+    full, display = record.get("fullTitle") or "", record.get("displayTitle")
+    # SermonAudio shows a shortened title ending in ".." when no short title was typed. Sending
+    # that back would pin it, and it would go stale the day the full title is corrected.
+    if isinstance(display, str) and display.endswith("..") and full.startswith(display[:-2].rstrip()):
+        display = None
+    return {
+        "acceptCopyright": True,
+        "fullTitle": full,
+        "speakerName": (record.get("speaker") or {}).get("displayName"),
+        "preachDate": record.get("preachDate"),
+        "publishTimestamp": record.get("publishTimestamp"),
+        "eventType": record.get("eventType"),
+        "displayTitle": display,
+        "subtitle": record.get("subtitle"),
+        "bibleText": record.get("bibleText"),
+        "moreInfoText": record.get("moreInfoText"),
+        "languageCode": record.get("languageCode"),
+        "newsInFocus": "false",
+        "keywords": keywords or None,
+    }
 
 
 class SermonAudioClient:
@@ -92,6 +131,42 @@ class SermonAudioClient:
         if owner.lower() != self.broadcaster_id.lower():
             raise SermonAudioError("That sermon belongs to a different broadcaster, so Phoebe won't read it.")
         return record
+
+    def replace_listing_text(self, sermon_id: str, changes: dict[str, str]) -> dict[str, Any]:
+        """Correct the title, Bible text, or speaker of one of the church's listings.
+
+        Reads the listing first (so the caller can't hand in a doctored record), sends every
+        field back, and changes only the fields named in `changes`. An empty `changes` sends
+        the listing back exactly as read, which is how the write is tested before it is trusted.
+        Returns {"before": the fields as read, "sent": the fields as sent}. One attempt, no retry.
+        """
+        unknown = sorted(set(changes) - set(EDITABLE_FIELDS))
+        if unknown:
+            raise SermonAudioError(f"Phoebe may not change {', '.join(unknown)} on a listing.")
+        for name, value in changes.items():
+            if not isinstance(value, str) or not value.strip() or len(value) > MAX_TEXT or "\n" in value:
+                raise SermonAudioError(f"The new {name} is empty, too long, or more than one line.")
+        record = self.sermon(sermon_id)            # also refuses another broadcaster's sermon
+        before = edit_body(record)
+        stamp = before["publishTimestamp"]
+        if not isinstance(stamp, (int, float)) or stamp <= 0:
+            raise SermonAudioError("That listing isn't published, so Phoebe won't edit it.")
+        missing = [k for k in ("fullTitle", "speakerName", "preachDate", "eventType") if not before.get(k)]
+        if missing:
+            raise SermonAudioError(f"The listing came back without {', '.join(missing)}, so nothing was sent.")
+        sent = {**before, **changes}
+        path = f"node/sermons/{str(sermon_id).strip()}"
+        try:
+            resp = self._http.put(path, json=sent)
+        except httpx.HTTPError as exc:
+            raise SermonAudioError(f"Could not reach SermonAudio: {type(exc).__name__}. "
+                                   "The change may or may not have been made; check the listing.") from exc
+        if resp.status_code in (401, 403):
+            raise SermonAudioError(f"SermonAudio refused the change ({resp.status_code}). "
+                                   "The church's API key may not be allowed to edit listings.")
+        if resp.status_code >= 400:
+            raise SermonAudioError(f"SermonAudio returned HTTP {resp.status_code} for the change; nothing was confirmed.")
+        return {"before": before, "sent": sent}
 
     def close(self) -> None:
         self._http.close()
