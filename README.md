@@ -10,9 +10,9 @@ which checks for a ✅ from an approved person **in code**, not just in her inst
 
 | Server | Status | Tools |
 |---|---|---|
-| `servers/pco` | Week 2: read-only | `list_service_types`, `list_upcoming_plans`, `get_plan`, `check_sunday_readiness` (the Sunday readiness check) |
+| `servers/pco` | Read-only | `list_service_types`, `list_upcoming_plans`, `get_plan`, `check_sunday_readiness` (the Sunday readiness check), `check_sermon_listing` (compares Sunday's SermonAudio listing with the plan) |
 | `servers/workspace` | Week 2: read-only | `read_sheet`, `list_calendar`, `preaching_schedule` (`create_doc` planned, Week 3) |
-| `servers/sermonaudio` | Week 2: read-only | `get_latest_sermons`, `get_sermon` |
+| `servers/sermonaudio` | Reads, plus one narrow edit | `get_latest_sermons`, `get_sermon`, `apply_listing_fixes` (corrects the title, Bible text, or speaker of Sunday's listing as the check decided) |
 | `servers/gmail` | planned (Week 3) | `list_new_messages`, `get_message` |
 | `servers/youtube` | planned (Week 4) | `get_latest_stream`, `get_video`, `propose_video_update` |
 | `shared/approval_gate` | planned (Week 3) | `propose_*` → `apply_change` |

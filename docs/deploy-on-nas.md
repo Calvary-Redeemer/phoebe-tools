@@ -257,6 +257,83 @@ Restart Hermes. To see the result without waiting for 9:00, run a job by hand wi
 scheduled run alone). Each run's prompt and reply are saved in
 `data/cron/output/<job_id>/<date_time>.md`.
 
+## 8. The SermonAudio listing check (Job D)
+
+Job D checks that last Sunday's sermon is on SermonAudio and agrees with the Planning Center
+plan, corrects the listing's text when the plan is clearly right, and posts the result. Three
+tools run in order, and each reads the small file the one before it saved in
+`/opt/data/phoebe-state/cache/`:
+
+1. `sermonaudio.get_latest_sermons` reads the newest listings and saves them.
+2. `pco.check_sermon_listing` compares Sunday's listing with Sunday's plan and saves what it
+   found, including the fields that should change. It changes nothing.
+3. `sermonaudio.apply_listing_fixes` (no arguments) makes those changes if fixing is on, reads
+   the listing again, and returns the post.
+
+**When a listing is changed.** Three places say what the sermon was: the plan title, the sermon
+item, and the listing. The listing is changed only when the two Planning Center places agree
+with each other and the listing differs. If the listing agrees with either one, it is left
+alone and the post names the Planning Center place that is the odd one out. Only the title,
+Bible text, and speaker can change, each at most once per listing, and the listing as it was
+is saved first under `/opt/data/phoebe-state/sermonaudio-fixes/`. This is the one change Phoebe
+makes without a ✅ in Slack; the limits are in `servers/sermonaudio/fixes.py`.
+
+**Settings.** Add to `conventions.yaml` (read on every run, so no restart):
+
+```yaml
+sermonaudio:
+  fix_listings: false          # true lets Phoebe correct the listing herself
+  event_type: "Sunday Service"
+```
+
+Add to Hermes's `config.yaml` and restart Hermes:
+
+```yaml
+  pco:
+    tools:
+      include: [..., check_sermon_listing]
+  sermonaudio:
+    env:
+      PHOEBE_STATE_DIR: "/opt/data/phoebe-state"
+    tools:
+      include: [get_latest_sermons, get_sermon, apply_listing_fixes]
+```
+
+**Test the write before trusting it.** SermonAudio's update call replaces a listing's text
+record, and a missing publish time unpublishes the sermon. Before turning `fix_listings` on,
+send one listing back exactly as it was read and confirm nothing moved:
+`replace_listing_text(sermon_id, {})` on the client, then read the listing again and compare.
+
+**The post** looks like this, and reads `*Would fix:*` in place of `*Fixed:*` while fixing is off:
+
+```
+*SermonAudio · Sun Nov 22* (Monday check)
+Genesis 4:17-5:32 | Seeds of Sin & Hope
+Pat Example · Foundations in Genesis · 51:40
+✅ Matches Sunday's plan.
+```
+
+```
+*Fixed:* the passage said "Isaiah 9:1-17"; the plan title and sermon item both say "Isaiah 9:1-7".
+*Needs a person:* the listing has no audio attached.
+```
+
+**Schedule it** (Sunday 4:00 pm and Monday 9:00 am, church time):
+
+```bash
+sudo docker exec -u 1002 hermes hermes cron create "0 16 * * 0" "<prompt>" --name job-d-sun --deliver slack:<channel id>
+sudo docker exec -u 1002 hermes hermes cron create "0 9 * * 1" "<prompt>" --name job-d-mon --deliver slack:<channel id>
+```
+
+The prompt, the same for both:
+
+> Run the SermonAudio check. Step 1: call the sermonaudio tool get_latest_sermons with count 8.
+> Step 2: call the pco tool check_sermon_listing. Step 3: call the sermonaudio tool
+> apply_listing_fixes with no arguments. Step 4: reply with the exact text of its report field
+> and nothing else. If a tool returns an error, reply with that error message and nothing else.
+> Do not change, add, or summarize anything. This job must never be silent: always reply with
+> the report, even when it says everything matches or it is the same as the last one.
+
 ## Updating
 
 ```bash
